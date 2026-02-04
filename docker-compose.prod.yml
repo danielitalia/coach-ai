@@ -1,0 +1,110 @@
+version: '3.8'
+
+# Coach AI - Production Docker Compose for Coolify
+# Each gym gets its own instance with these services
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-coachai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password required}
+      POSTGRES_DB: ${POSTGRES_DB:-coachai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - coachai-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-coachai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Evolution API - WhatsApp Gateway
+  evolution-api:
+    image: atendai/evolution-api:v2.1.1
+    restart: always
+    environment:
+      - SERVER_URL=${SERVER_URL:?Server URL required}
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:?Evolution API key required}
+      - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
+      - DATABASE_ENABLED=false
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://${POSTGRES_USER:-coachai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-coachai}
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=false
+      - DATABASE_SAVE_MESSAGE_UPDATE=false
+      - DATABASE_SAVE_DATA_CONTACTS=false
+      - DATABASE_SAVE_DATA_CHATS=false
+      - DATABASE_SAVE_DATA_LABELS=false
+      - DATABASE_SAVE_DATA_HISTORIC=false
+      - LOG_LEVEL=WARN
+      - DEL_INSTANCE=false
+      - CONFIG_SESSION_PHONE_CLIENT=Coach AI
+      - CONFIG_SESSION_PHONE_NAME=Chrome
+      - QRCODE_LIMIT=10
+      - QRCODE_COLOR=#000000
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - coachai-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Coach AI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-coachai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-coachai}
+      - EVOLUTION_API_URL=http://evolution-api:8080
+      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?OpenAI API key required}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - GYM_NAME=${GYM_NAME:-Palestra}
+      - COACH_NAME=${COACH_NAME:-Coach AI}
+    networks:
+      - coachai-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      evolution-api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Dashboard (Nginx serving static files + reverse proxy)
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile.prod
+    restart: always
+    ports:
+      - "${PORT:-80}:80"
+    environment:
+      - API_URL=http://backend:3000
+    networks:
+      - coachai-network
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  evolution_instances:
+
+networks:
+  coachai-network:
+    driver: bridge
