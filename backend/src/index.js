@@ -963,8 +963,12 @@ app.get('/api/checkin-qrcode', async (req, res) => {
       { headers: { 'apikey': EVOLUTION_API_KEY } }
     );
 
-    const instance = whatsappInfo.data?.find(i => i.name === INSTANCE_NAME);
-    let gymPhone = instance?.ownerJid?.replace('@s.whatsapp.net', '') || '';
+    const instance = whatsappInfo.data?.find(i =>
+      i.name === INSTANCE_NAME || i.instance?.instanceName === INSTANCE_NAME
+    );
+    // Evolution v1.8.7 usa instance.owner, versioni più vecchie usano ownerJid
+    let gymPhone = (instance?.instance?.owner || instance?.ownerJid || '')
+      .replace('@s.whatsapp.net', '');
 
     // Se non c'è un numero collegato, usa un placeholder
     if (!gymPhone) {
