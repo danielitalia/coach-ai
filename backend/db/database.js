@@ -252,6 +252,89 @@ async function setConfig(key, value) {
   `, [key, JSON.stringify(value)]);
 }
 
+// ========== CHECK-INS ==========
+
+async function addCheckin(phone, workoutDay = null, notes = null) {
+  const result = await pool.query(`
+    INSERT INTO checkins (phone, workout_day, notes)
+    VALUES ($1, $2, $3)
+    RETURNING *
+  `, [phone, workoutDay, notes]);
+  return result.rows[0];
+}
+
+async function getCheckins(phone, limit = 30) {
+  const result = await pool.query(`
+    SELECT * FROM checkins
+    WHERE phone = $1
+    ORDER BY checked_in_at DESC
+    LIMIT $2
+  `, [phone, limit]);
+  return result.rows;
+}
+
+async function getTodayCheckin(phone) {
+  const result = await pool.query(`
+    SELECT * FROM checkins
+    WHERE phone = $1
+    AND DATE(checked_in_at) = CURRENT_DATE
+    ORDER BY checked_in_at DESC
+    LIMIT 1
+  `, [phone]);
+  return result.rows[0] || null;
+}
+
+async function getCheckinStats(phone) {
+  const result = await pool.query(`
+    SELECT
+      COUNT(*) as total_checkins,
+      COUNT(*) FILTER (WHERE checked_in_at > NOW() - INTERVAL '7 days') as this_week,
+      COUNT(*) FILTER (WHERE checked_in_at > NOW() - INTERVAL '30 days') as this_month,
+      MAX(checked_in_at) as last_checkin
+    FROM checkins
+    WHERE phone = $1
+  `, [phone]);
+  return result.rows[0];
+}
+
+async function getCheckinStreak(phone) {
+  // Calcola la streak corrente (giorni consecutivi)
+  const result = await pool.query(`
+    WITH daily_checkins AS (
+      SELECT DISTINCT DATE(checked_in_at) as checkin_date
+      FROM checkins
+      WHERE phone = $1
+      ORDER BY checkin_date DESC
+    ),
+    streaks AS (
+      SELECT
+        checkin_date,
+        checkin_date - (ROW_NUMBER() OVER (ORDER BY checkin_date DESC))::int AS streak_group
+      FROM daily_checkins
+    )
+    SELECT COUNT(*) as streak
+    FROM streaks
+    WHERE streak_group = (
+      SELECT streak_group FROM streaks WHERE checkin_date = CURRENT_DATE
+      UNION
+      SELECT streak_group FROM streaks WHERE checkin_date = CURRENT_DATE - 1
+      LIMIT 1
+    )
+  `, [phone]);
+  return parseInt(result.rows[0]?.streak) || 0;
+}
+
+async function getAllCheckinsToday() {
+  const result = await pool.query(`
+    SELECT c.*, cl.name
+    FROM checkins c
+    JOIN clients cl ON c.phone = cl.phone
+    WHERE DATE(c.checked_in_at) = CURRENT_DATE
+    ORDER BY c.checked_in_at DESC
+  `);
+  return result.rows;
+}
+
 // ========== STATS ==========
 
 async function getStats() {
@@ -290,6 +373,13 @@ module.exports = {
   addSentReminder,
   clearSentReminders,
   getAllSentReminders,
+  // Check-ins
+  addCheckin,
+  getCheckins,
+  getTodayCheckin,
+  getCheckinStats,
+  getCheckinStreak,
+  getAllCheckinsToday,
   // Config
   getConfig,
   setConfig,

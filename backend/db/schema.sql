@@ -55,11 +55,22 @@ CREATE TABLE IF NOT EXISTS config (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tabella check-in palestra
+CREATE TABLE IF NOT EXISTS checkins (
+    id SERIAL PRIMARY KEY,
+    phone VARCHAR(20) NOT NULL REFERENCES clients(phone) ON DELETE CASCADE,
+    checked_in_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    workout_day VARCHAR(100), -- es. "Giorno 1 - Petto/Tricipiti"
+    notes TEXT
+);
+
 -- Indici per performance
 CREATE INDEX IF NOT EXISTS idx_messages_phone ON messages(phone);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workout_plans_phone ON workout_plans(phone);
 CREATE INDEX IF NOT EXISTS idx_clients_last_activity ON clients(last_activity);
+CREATE INDEX IF NOT EXISTS idx_checkins_phone ON checkins(phone);
+CREATE INDEX IF NOT EXISTS idx_checkins_date ON checkins(checked_in_at DESC);
 
 -- Inserisci configurazione default promemoria
 INSERT INTO config (key, value) VALUES (

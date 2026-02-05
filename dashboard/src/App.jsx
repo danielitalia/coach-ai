@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-do
 import {
   Users, MessageSquare, BarChart3, Settings as SettingsIcon,
   Dumbbell, Menu, X, Phone, Clock, TrendingUp,
-  UserPlus, Activity, Calendar, Bell, Smartphone
+  UserPlus, Activity, Calendar, Bell, Smartphone, QrCode
 } from 'lucide-react'
 import ClientList from './components/ClientList'
 import Conversations from './components/Conversations'
@@ -12,6 +12,7 @@ import Reminders from './components/Reminders'
 import WorkoutPlans from './components/WorkoutPlans'
 import SettingsPage from './components/Settings'
 import WhatsAppConnect from './components/WhatsAppConnect'
+import CheckIn from './components/CheckIn'
 
 function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
   const location = useLocation()
@@ -21,6 +22,7 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
     { to: '/clients', icon: Users, label: 'Clienti' },
     { to: '/conversations', icon: MessageSquare, label: 'Conversazioni' },
     { to: '/workouts', icon: Dumbbell, label: 'Schede' },
+    { to: '/checkin', icon: QrCode, label: 'Check-in' },
     { to: '/reminders', icon: Bell, label: 'Promemoria' },
     { to: '/whatsapp', icon: Smartphone, label: 'WhatsApp' },
     { to: '/settings', icon: SettingsIcon, label: 'Impostazioni' },
@@ -319,6 +321,7 @@ function App() {
               <Route path="/clients" element={<ClientList />} />
               <Route path="/conversations" element={<Conversations />} />
               <Route path="/workouts" element={<WorkoutPlans />} />
+              <Route path="/checkin" element={<CheckIn />} />
               <Route path="/reminders" element={<Reminders />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/whatsapp" element={<WhatsAppConnect />} />

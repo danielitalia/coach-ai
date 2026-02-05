@@ -131,8 +131,17 @@ app.post('/webhook', async (req, res) => {
         // Aggiorna attività cliente nel DB
         await db.updateClientActivity(phoneNumber);
 
-        // Processa con AI e rispondi
-        const response = await processMessage(phoneNumber, text);
+        // Controlla se è un comando di check-in
+        const checkinKeywords = ['check-in', 'checkin', 'check in', 'sono in palestra', 'arrivo', 'eccomi', 'sono arrivato', 'sono arrivata', 'presente'];
+        const isCheckin = checkinKeywords.some(keyword => text.toLowerCase().includes(keyword));
+
+        let response;
+        if (isCheckin) {
+          response = await processCheckin(phoneNumber);
+        } else {
+          // Processa con AI e rispondi
+          response = await processMessage(phoneNumber, text);
+        }
         await sendWhatsAppMessage(phoneNumber, response);
       }
     }
@@ -173,6 +182,84 @@ async function processMessage(phoneNumber, text) {
   } catch (error) {
     console.error('Errore AI:', error);
     return 'Scusa, ho avuto un problema tecnico. Riprova tra un attimo!';
+  }
+}
+
+// ========== CHECK-IN ==========
+
+async function processCheckin(phoneNumber) {
+  try {
+    // Verifica se ha già fatto check-in oggi
+    const todayCheckin = await db.getTodayCheckin(phoneNumber);
+    if (todayCheckin) {
+      return `Hai già fatto check-in oggi alle ${new Date(todayCheckin.checked_in_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}! 💪\n\nBuon allenamento!`;
+    }
+
+    // Recupera info cliente
+    const client = await db.getClient(phoneNumber);
+    const clientName = client?.name || 'Campione';
+
+    // Recupera l'ultima scheda del cliente
+    const workoutPlans = await db.getWorkoutPlansByPhone(phoneNumber);
+    const latestPlan = workoutPlans[0];
+
+    // Calcola quale giorno di allenamento è (rotazione)
+    let workoutDay = null;
+    let workoutMessage = '';
+
+    if (latestPlan) {
+      const workouts = typeof latestPlan.workouts === 'string'
+        ? JSON.parse(latestPlan.workouts)
+        : latestPlan.workouts;
+
+      // Conta i check-in totali per determinare il giorno
+      const checkinStats = await db.getCheckinStats(phoneNumber);
+      const totalCheckins = parseInt(checkinStats?.total_checkins) || 0;
+      const dayIndex = totalCheckins % workouts.length;
+      const todayWorkout = workouts[dayIndex];
+      workoutDay = todayWorkout.day;
+
+      workoutMessage = `\n\n📋 *${todayWorkout.day}*\n`;
+      todayWorkout.exercises.forEach((ex, i) => {
+        workoutMessage += `${i + 1}. ${ex.name}: ${ex.sets}x${ex.reps} (${ex.rest})\n`;
+      });
+    }
+
+    // Registra il check-in
+    await db.addCheckin(phoneNumber, workoutDay);
+
+    // Ottieni statistiche
+    const stats = await db.getCheckinStats(phoneNumber);
+    const streak = await db.getCheckinStreak(phoneNumber);
+    const thisMonth = parseInt(stats?.this_month) || 1;
+
+    // Costruisci messaggio personalizzato
+    let message = `*Check-in registrato!* ✅\n\n`;
+    message += `Ciao ${clientName}! 💪\n`;
+
+    // Messaggi motivazionali basati sulle statistiche
+    if (streak > 1) {
+      message += `🔥 Streak: ${streak} giorni consecutivi!\n`;
+    }
+    message += `📊 Allenamenti questo mese: ${thisMonth}\n`;
+
+    // Aggiungi la scheda del giorno se disponibile
+    if (workoutMessage) {
+      message += workoutMessage;
+    } else {
+      message += `\nNon hai ancora una scheda! Scrivi "voglio una scheda" per crearne una personalizzata.`;
+    }
+
+    message += `\n\n*Buon allenamento!* 🏋️`;
+
+    // Salva nel DB come messaggio
+    await db.addMessage(phoneNumber, 'user', 'check-in');
+    await db.addMessage(phoneNumber, 'assistant', message);
+
+    return message;
+  } catch (error) {
+    console.error('Errore check-in:', error);
+    return 'Check-in registrato! ✅ Buon allenamento! 💪';
   }
 }
 
@@ -818,6 +905,123 @@ app.get('/api/workouts-stats', async (req, res) => {
     });
   } catch (error) {
     console.error('Errore workout stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== CHECK-IN API ==========
+
+// Ottieni check-in di oggi
+app.get('/api/checkins/today', async (req, res) => {
+  try {
+    const checkins = await db.getAllCheckinsToday();
+    res.json(checkins.map(c => ({
+      phone: c.phone,
+      name: c.name || `Cliente ${c.phone.slice(-4)}`,
+      checkedInAt: c.checked_in_at,
+      workoutDay: c.workout_day
+    })));
+  } catch (error) {
+    console.error('Errore checkins today:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Ottieni statistiche check-in di un cliente
+app.get('/api/checkins/:phone', async (req, res) => {
+  try {
+    const checkins = await db.getCheckins(req.params.phone, 30);
+    const stats = await db.getCheckinStats(req.params.phone);
+    const streak = await db.getCheckinStreak(req.params.phone);
+
+    res.json({
+      checkins: checkins.map(c => ({
+        id: c.id,
+        checkedInAt: c.checked_in_at,
+        workoutDay: c.workout_day
+      })),
+      stats: {
+        total: parseInt(stats?.total_checkins) || 0,
+        thisWeek: parseInt(stats?.this_week) || 0,
+        thisMonth: parseInt(stats?.this_month) || 0,
+        lastCheckin: stats?.last_checkin,
+        streak: streak
+      }
+    });
+  } catch (error) {
+    console.error('Errore checkins:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Genera QR Code per check-in palestra
+app.get('/api/checkin-qrcode', async (req, res) => {
+  try {
+    // Recupera il numero WhatsApp della palestra
+    const whatsappInfo = await axios.get(
+      `${EVOLUTION_API_URL}/instance/fetchInstances`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    );
+
+    const instance = whatsappInfo.data?.find(i => i.name === INSTANCE_NAME);
+    let gymPhone = instance?.ownerJid?.replace('@s.whatsapp.net', '') || '';
+
+    // Se non c'è un numero collegato, usa un placeholder
+    if (!gymPhone) {
+      return res.status(400).json({
+        error: 'WhatsApp non collegato',
+        message: 'Collega prima WhatsApp dalla pagina Connessione'
+      });
+    }
+
+    // Genera URL WhatsApp con messaggio precompilato
+    const message = encodeURIComponent('check-in');
+    const whatsappUrl = `https://wa.me/${gymPhone}?text=${message}`;
+
+    // Genera QR Code usando API esterna gratuita
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(whatsappUrl)}`;
+
+    res.json({
+      success: true,
+      gymPhone: gymPhone,
+      whatsappUrl: whatsappUrl,
+      qrCodeUrl: qrCodeUrl,
+      instructions: [
+        'Stampa questo QR Code e posizionalo all\'ingresso della palestra',
+        'I clienti scannerizzano il QR con la fotocamera del telefono',
+        'Si apre WhatsApp con messaggio "check-in" precompilato',
+        'Premono Invia e ricevono la scheda del giorno!'
+      ]
+    });
+  } catch (error) {
+    console.error('Errore generazione QR check-in:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Statistiche generali check-in
+app.get('/api/checkins-stats', async (req, res) => {
+  try {
+    const today = await db.getAllCheckinsToday();
+    const result = await db.pool.query(`
+      SELECT
+        COUNT(*) as total_checkins,
+        COUNT(DISTINCT phone) as unique_clients,
+        COUNT(*) FILTER (WHERE checked_in_at > NOW() - INTERVAL '7 days') as this_week,
+        COUNT(*) FILTER (WHERE checked_in_at > NOW() - INTERVAL '30 days') as this_month
+      FROM checkins
+    `);
+    const stats = result.rows[0];
+
+    res.json({
+      today: today.length,
+      totalCheckins: parseInt(stats.total_checkins) || 0,
+      uniqueClients: parseInt(stats.unique_clients) || 0,
+      thisWeek: parseInt(stats.this_week) || 0,
+      thisMonth: parseInt(stats.this_month) || 0
+    });
+  } catch (error) {
+    console.error('Errore checkin stats:', error);
     res.status(500).json({ error: error.message });
   }
 });
