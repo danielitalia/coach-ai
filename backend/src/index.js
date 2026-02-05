@@ -845,47 +845,90 @@ app.get('/api/whatsapp/status', async (req, res) => {
 // Get QR Code for WhatsApp connection
 app.get('/api/whatsapp/qrcode', async (req, res) => {
   try {
-    // First check if instance exists
-    const statusResponse = await axios.get(
-      `${EVOLUTION_API_URL}/instance/connectionState/${INSTANCE_NAME}`,
-      { headers: { 'apikey': EVOLUTION_API_KEY } }
-    ).catch(() => null);
+    // First check if instance exists and get its status
+    let instanceExists = false;
+    let instanceState = 'unknown';
+
+    try {
+      const fetchResponse = await axios.get(
+        `${EVOLUTION_API_URL}/instance/fetchInstances`,
+        { headers: { 'apikey': EVOLUTION_API_KEY } }
+      );
+      const instance = fetchResponse.data?.find(i => i.name === INSTANCE_NAME || i.instance?.instanceName === INSTANCE_NAME);
+      if (instance) {
+        instanceExists = true;
+        instanceState = instance.connectionStatus || instance.instance?.state || 'unknown';
+        console.log(`Instance ${INSTANCE_NAME} found, state: ${instanceState}`);
+      }
+    } catch (e) {
+      console.log('Error checking instances:', e.message);
+    }
 
     // If connected, no QR needed
-    if (statusResponse?.data?.instance?.state === 'open') {
+    if (instanceState === 'open') {
       return res.json({ connected: true, qrcode: null });
     }
 
-    // Try to get QR code
-    const response = await axios.get(
-      `${EVOLUTION_API_URL}/instance/connect/${INSTANCE_NAME}`,
-      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    // If instance exists, try to connect (get QR)
+    if (instanceExists) {
+      try {
+        const connectResponse = await axios.get(
+          `${EVOLUTION_API_URL}/instance/connect/${INSTANCE_NAME}`,
+          { headers: { 'apikey': EVOLUTION_API_KEY } }
+        );
+
+        if (connectResponse.data.qrcode?.base64) {
+          return res.json({
+            connected: false,
+            qrcode: connectResponse.data.qrcode.base64,
+            pairingCode: connectResponse.data.pairingCode
+          });
+        } else if (connectResponse.data.base64) {
+          return res.json({
+            connected: false,
+            qrcode: connectResponse.data.base64,
+            pairingCode: connectResponse.data.pairingCode
+          });
+        } else if (connectResponse.data.instance?.state === 'open') {
+          return res.json({ connected: true, qrcode: null });
+        }
+
+        // No QR in response, return current state
+        return res.json({
+          connected: false,
+          qrcode: null,
+          state: instanceState,
+          message: 'Instance exists but no QR available. Try refreshing.'
+        });
+      } catch (connectError) {
+        console.log('Connect error:', connectError.response?.data || connectError.message);
+        // Continue to try creating if connect fails
+      }
+    }
+
+    // Instance doesn't exist, create it
+    console.log(`Creating new instance: ${INSTANCE_NAME}`);
+    const createResponse = await axios.post(
+      `${EVOLUTION_API_URL}/instance/create`,
+      {
+        instanceName: INSTANCE_NAME,
+        integration: 'WHATSAPP-BAILEYS',
+        qrcode: true,
+        webhook: `http://backend:3000/webhook`,
+        webhookByEvents: true,
+        webhookEvents: ['messages.upsert']
+      },
+      { headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY } }
     );
 
-    if (response.data.qrcode?.base64) {
-      res.json({
-        connected: false,
-        qrcode: response.data.qrcode.base64,
-        pairingCode: response.data.pairingCode
-      });
-    } else if (response.data.instance?.state === 'open') {
-      res.json({ connected: true, qrcode: null });
-    } else {
-      // Instance doesn't exist, create it
-      const createResponse = await axios.post(
-        `${EVOLUTION_API_URL}/instance/create`,
-        { instanceName: INSTANCE_NAME, integration: 'WHATSAPP-BAILEYS', qrcode: true },
-        { headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY } }
-      );
-      res.json({
-        connected: false,
-        qrcode: createResponse.data.qrcode?.base64 || null,
-        pairingCode: createResponse.data.pairingCode
-      });
-    }
+    res.json({
+      connected: false,
+      qrcode: createResponse.data.qrcode?.base64 || createResponse.data.base64 || null,
+      pairingCode: createResponse.data.pairingCode
+    });
   } catch (error) {
     console.error('Errore QR WhatsApp:', error.response?.data || error.message);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.response?.data?.message || error.message });
   }
 });
 
@@ -906,18 +949,44 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
 // Restart WhatsApp instance (for new QR)
 app.post('/api/whatsapp/restart', async (req, res) => {
   try {
-    const response = await axios.post(
-      `${EVOLUTION_API_URL}/instance/restart/${INSTANCE_NAME}`,
-      {},
+    // Try restart first
+    try {
+      const restartResponse = await axios.post(
+        `${EVOLUTION_API_URL}/instance/restart/${INSTANCE_NAME}`,
+        {},
+        { headers: { 'apikey': EVOLUTION_API_KEY } }
+      );
+      if (restartResponse.data) {
+        // After restart, try to get new QR
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait a bit
+        const connectResponse = await axios.get(
+          `${EVOLUTION_API_URL}/instance/connect/${INSTANCE_NAME}`,
+          { headers: { 'apikey': EVOLUTION_API_KEY } }
+        );
+        return res.json({
+          success: true,
+          qrcode: connectResponse.data.qrcode?.base64 || connectResponse.data.base64 || null,
+          pairingCode: connectResponse.data.pairingCode
+        });
+      }
+    } catch (restartError) {
+      console.log('Restart failed, trying connect directly:', restartError.response?.data || restartError.message);
+    }
+
+    // If restart fails, just try to connect
+    const connectResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/connect/${INSTANCE_NAME}`,
       { headers: { 'apikey': EVOLUTION_API_KEY } }
     );
+
     res.json({
       success: true,
-      qrcode: response.data.base64 || null
+      qrcode: connectResponse.data.qrcode?.base64 || connectResponse.data.base64 || null,
+      pairingCode: connectResponse.data.pairingCode
     });
   } catch (error) {
     console.error('Errore restart WhatsApp:', error.response?.data || error.message);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.response?.data?.message || error.message });
   }
 });
 
