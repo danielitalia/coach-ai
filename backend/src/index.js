@@ -135,9 +135,27 @@ app.post('/webhook', async (req, res) => {
         const checkinKeywords = ['check-in', 'checkin', 'check in', 'sono in palestra', 'arrivo', 'eccomi', 'sono arrivato', 'sono arrivata', 'presente'];
         const isCheckin = checkinKeywords.some(keyword => text.toLowerCase().includes(keyword));
 
+        // Controlla se è un comando referral
+        const referralKeywords = ['invita', 'porta un amico', 'referral', 'codice amico', 'invita amico'];
+        const isReferralRequest = referralKeywords.some(keyword => text.toLowerCase().includes(keyword));
+
+        // Controlla se sta usando un codice referral (es. "REF-ABC123")
+        const referralCodeMatch = text.toUpperCase().match(/\b([A-Z0-9]{9})\b/);
+        const isUsingReferralCode = referralCodeMatch && !isReferralRequest;
+
+        // Controlla se chiede i suoi premi
+        const rewardKeywords = ['premi', 'rewards', 'i miei premi', 'miei premi', 'bonus'];
+        const isRewardRequest = rewardKeywords.some(keyword => text.toLowerCase().includes(keyword));
+
         let response;
         if (isCheckin) {
           response = await processCheckin(phoneNumber);
+        } else if (isReferralRequest) {
+          response = await processReferralRequest(phoneNumber);
+        } else if (isUsingReferralCode) {
+          response = await processReferralCode(phoneNumber, referralCodeMatch[1]);
+        } else if (isRewardRequest) {
+          response = await processRewardRequest(phoneNumber);
         } else {
           // Processa con AI e rispondi
           response = await processMessage(phoneNumber, text);
@@ -228,7 +246,24 @@ async function processCheckin(phoneNumber) {
     // Registra il check-in
     await db.addCheckin(phoneNumber, workoutDay);
 
-    // Ottieni statistiche
+    // Controlla se è il primo check-in e completa eventuale referral
+    const checkinStats = await db.getCheckinStats(phoneNumber);
+    const isFirstCheckin = parseInt(checkinStats?.total_checkins) === 1;
+
+    let referralBonus = '';
+    if (isFirstCheckin) {
+      const completedReferral = await db.completeReferral(phoneNumber);
+      if (completedReferral) {
+        const referrer = await db.getClient(completedReferral.referrer_phone);
+        referralBonus = `\n\n🎉 *Bonus sbloccato!*\nTu e ${referrer?.name || 'il tuo amico'} avete ricevuto un premio!\nScrivi "premi" per vedere il tuo bonus!`;
+
+        // Notifica anche chi ha invitato
+        const referrerRewardMsg = `🎉 *Grande notizia!*\n\n${clientName} ha fatto il primo check-in!\n\nHai guadagnato una settimana gratuita! 🎁\nScrivi "premi" per vedere i dettagli.`;
+        await sendWhatsAppMessage(completedReferral.referrer_phone, referrerRewardMsg);
+      }
+    }
+
+    // Ottieni statistiche aggiornate
     const stats = await db.getCheckinStats(phoneNumber);
     const streak = await db.getCheckinStreak(phoneNumber);
     const thisMonth = parseInt(stats?.this_month) || 1;
@@ -250,6 +285,7 @@ async function processCheckin(phoneNumber) {
       message += `\nNon hai ancora una scheda! Scrivi "voglio una scheda" per crearne una personalizzata.`;
     }
 
+    message += referralBonus;
     message += `\n\n*Buon allenamento!* 🏋️`;
 
     // Salva nel DB come messaggio
@@ -260,6 +296,126 @@ async function processCheckin(phoneNumber) {
   } catch (error) {
     console.error('Errore check-in:', error);
     return 'Check-in registrato! ✅ Buon allenamento! 💪';
+  }
+}
+
+// ========== REFERRAL PROGRAM ==========
+
+async function processReferralRequest(phoneNumber) {
+  try {
+    const client = await db.getClient(phoneNumber);
+    const clientName = client?.name || 'Amico';
+
+    // Genera o recupera il codice referral
+    const referralCode = await db.createReferralCode(phoneNumber);
+
+    // Ottieni statistiche referral
+    const stats = await db.getReferralStats(phoneNumber);
+    const completed = parseInt(stats?.completed) || 0;
+
+    let message = `🎁 *Programma Porta un Amico*\n\n`;
+    message += `Ciao ${clientName}! Ecco il tuo codice personale:\n\n`;
+    message += `📱 *${referralCode}*\n\n`;
+    message += `*Come funziona:*\n`;
+    message += `1️⃣ Condividi il codice con un amico\n`;
+    message += `2️⃣ Il tuo amico scrive il codice in chat quando si iscrive\n`;
+    message += `3️⃣ Quando fa il primo check-in, entrambi ricevete un premio!\n\n`;
+    message += `🏆 *I tuoi inviti:* ${completed} amici portati\n`;
+
+    if (completed > 0) {
+      message += `\nScrivi "premi" per vedere i tuoi bonus! 🎉`;
+    }
+
+    // Salva nel DB
+    await db.addMessage(phoneNumber, 'user', 'richiesta codice referral');
+    await db.addMessage(phoneNumber, 'assistant', message);
+
+    return message;
+  } catch (error) {
+    console.error('Errore referral request:', error);
+    return 'Ops! Qualcosa è andato storto. Riprova tra poco! 🙏';
+  }
+}
+
+async function processReferralCode(phoneNumber, code) {
+  try {
+    const client = await db.getClient(phoneNumber);
+    const clientName = client?.name || 'Amico';
+
+    // Prova a usare il codice
+    const result = await db.useReferralCode(code, phoneNumber);
+
+    if (!result.success) {
+      return `❌ ${result.error}\n\nSe hai un codice valido, scrivilo di nuovo!`;
+    }
+
+    // Ottieni info su chi ha invitato
+    const referrer = await db.getClient(result.referrerPhone);
+    const referrerName = referrer?.name || 'Un amico';
+
+    let message = `🎉 *Codice accettato!*\n\n`;
+    message += `Benvenuto ${clientName}!\n`;
+    message += `Sei stato invitato da *${referrerName}*!\n\n`;
+    message += `👉 Fai il tuo primo *check-in* in palestra e entrambi riceverete un premio speciale!\n\n`;
+    message += `Scrivi "check-in" quando arrivi in palestra! 💪`;
+
+    // Salva nel DB
+    await db.addMessage(phoneNumber, 'user', `codice referral: ${code}`);
+    await db.addMessage(phoneNumber, 'assistant', message);
+
+    return message;
+  } catch (error) {
+    console.error('Errore uso codice referral:', error);
+    return 'Ops! Qualcosa è andato storto. Riprova tra poco! 🙏';
+  }
+}
+
+async function processRewardRequest(phoneNumber) {
+  try {
+    const client = await db.getClient(phoneNumber);
+    const clientName = client?.name || 'Amico';
+
+    // Ottieni i premi non riscossi
+    const rewards = await db.getUnclaimedRewards(phoneNumber);
+    const allRewards = await db.getRewards(phoneNumber);
+
+    let message = `🏆 *I tuoi premi*\n\n`;
+    message += `Ciao ${clientName}!\n\n`;
+
+    if (rewards.length === 0) {
+      message += `Non hai premi da riscuotere al momento.\n\n`;
+      message += `💡 Invita un amico per guadagnare premi!\n`;
+      message += `Scrivi "invita" per ottenere il tuo codice personale.`;
+    } else {
+      message += `*Premi disponibili:*\n`;
+      rewards.forEach((reward, i) => {
+        const emoji = reward.reward_type === 'free_week' ? '🎫' : '🎁';
+        message += `${emoji} ${reward.description}\n`;
+        if (reward.expires_at) {
+          const expiresDate = new Date(reward.expires_at).toLocaleDateString('it-IT');
+          message += `   ⏰ Scade il ${expiresDate}\n`;
+        }
+      });
+      message += `\n📍 Mostra questo messaggio alla reception per riscuotere!`;
+    }
+
+    // Mostra anche statistiche generali
+    const referralStats = await db.getReferralStats(phoneNumber);
+    const totalInvites = parseInt(referralStats?.completed) || 0;
+    const totalRewards = allRewards.length;
+
+    message += `\n\n📊 *Le tue statistiche:*\n`;
+    message += `• Amici invitati: ${totalInvites}\n`;
+    message += `• Premi totali guadagnati: ${totalRewards}`;
+
+    // Salva nel DB
+    await db.addMessage(phoneNumber, 'user', 'richiesta premi');
+    await db.addMessage(phoneNumber, 'assistant', message);
+
+    return message;
+  } catch (error) {
+    console.error('Errore reward request:', error);
+    return 'Ops! Qualcosa è andato storto. Riprova tra poco! 🙏';
   }
 }
 
@@ -1026,6 +1182,104 @@ app.get('/api/checkins-stats', async (req, res) => {
     });
   } catch (error) {
     console.error('Errore checkin stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== REFERRAL API ==========
+
+// Lista tutti i referral (per dashboard)
+app.get('/api/referrals', async (req, res) => {
+  try {
+    const referrals = await db.getAllReferrals();
+    res.json(referrals);
+  } catch (error) {
+    console.error('Errore get referrals:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Statistiche generali referral
+app.get('/api/referrals/stats', async (req, res) => {
+  try {
+    const result = await db.pool.query(`
+      SELECT
+        COUNT(*) as total_referrals,
+        COUNT(*) FILTER (WHERE status = 'pending') as pending,
+        COUNT(*) FILTER (WHERE status = 'registered') as registered,
+        COUNT(*) FILTER (WHERE status = 'completed') as completed,
+        COUNT(DISTINCT referrer_phone) as total_referrers
+      FROM referrals
+    `);
+    const stats = result.rows[0];
+
+    const rewardStats = await db.getAllRewardsStats();
+
+    res.json({
+      totalReferrals: parseInt(stats.total_referrals) || 0,
+      pending: parseInt(stats.pending) || 0,
+      registered: parseInt(stats.registered) || 0,
+      completed: parseInt(stats.completed) || 0,
+      totalReferrers: parseInt(stats.total_referrers) || 0,
+      rewards: rewardStats
+    });
+  } catch (error) {
+    console.error('Errore referral stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Classifica top referrers
+app.get('/api/referrals/leaderboard', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const leaderboard = await db.getReferralLeaderboard(limit);
+    res.json(leaderboard);
+  } catch (error) {
+    console.error('Errore leaderboard:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Referrals di un cliente specifico
+app.get('/api/referrals/client/:phone', async (req, res) => {
+  try {
+    const referrals = await db.getMyReferrals(req.params.phone);
+    const stats = await db.getReferralStats(req.params.phone);
+    res.json({ referrals, stats });
+  } catch (error) {
+    console.error('Errore client referrals:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Lista tutti i rewards
+app.get('/api/rewards', async (req, res) => {
+  try {
+    const result = await db.pool.query(`
+      SELECT r.*, c.name as client_name
+      FROM rewards r
+      LEFT JOIN clients c ON r.phone = c.phone
+      ORDER BY r.created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Errore get rewards:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Riscatta un premio (dalla dashboard)
+app.post('/api/rewards/:id/claim', async (req, res) => {
+  try {
+    const { phone } = req.body;
+    const reward = await db.claimReward(req.params.id, phone);
+    if (!reward) {
+      return res.status(404).json({ error: 'Premio non trovato o già riscosso' });
+    }
+    res.json({ success: true, reward });
+  } catch (error) {
+    console.error('Errore claim reward:', error);
     res.status(500).json({ error: error.message });
   }
 });

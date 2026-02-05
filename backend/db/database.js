@@ -335,6 +335,204 @@ async function getAllCheckinsToday() {
   return result.rows;
 }
 
+// ========== REFERRALS ==========
+
+// Genera codice referral univoco
+function generateReferralCode(phone) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  // Aggiungi ultime 3 cifre del telefono per unicità
+  return code + phone.slice(-3);
+}
+
+async function createReferralCode(phone) {
+  // Controlla se esiste già un codice per questo cliente
+  const existing = await pool.query(
+    'SELECT referral_code FROM referrals WHERE referrer_phone = $1 AND referred_phone IS NULL LIMIT 1',
+    [phone]
+  );
+
+  if (existing.rows[0]) {
+    return existing.rows[0].referral_code;
+  }
+
+  // Crea nuovo codice
+  const code = generateReferralCode(phone);
+  await pool.query(`
+    INSERT INTO referrals (referrer_phone, referral_code)
+    VALUES ($1, $2)
+    ON CONFLICT (referral_code) DO NOTHING
+  `, [phone, code]);
+
+  return code;
+}
+
+async function getReferralByCode(code) {
+  const result = await pool.query(
+    'SELECT * FROM referrals WHERE referral_code = $1',
+    [code.toUpperCase()]
+  );
+  return result.rows[0] || null;
+}
+
+async function useReferralCode(code, referredPhone) {
+  // Verifica che il codice esista e non sia già usato
+  const referral = await getReferralByCode(code);
+
+  if (!referral) {
+    return { success: false, error: 'Codice non valido' };
+  }
+
+  if (referral.referred_phone) {
+    return { success: false, error: 'Codice già utilizzato' };
+  }
+
+  if (referral.referrer_phone === referredPhone) {
+    return { success: false, error: 'Non puoi usare il tuo stesso codice!' };
+  }
+
+  // Aggiorna il referral
+  await pool.query(`
+    UPDATE referrals
+    SET referred_phone = $1, status = 'registered', converted_at = CURRENT_TIMESTAMP
+    WHERE referral_code = $2
+  `, [referredPhone, code.toUpperCase()]);
+
+  return { success: true, referrerPhone: referral.referrer_phone };
+}
+
+async function completeReferral(referredPhone) {
+  // Chiamato quando il nuovo cliente fa il primo check-in o completa onboarding
+  const result = await pool.query(`
+    UPDATE referrals
+    SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+    WHERE referred_phone = $1 AND status = 'registered'
+    RETURNING *
+  `, [referredPhone]);
+
+  if (result.rows[0]) {
+    // Crea reward per chi ha invitato
+    await createReward(result.rows[0].referrer_phone, 'free_week', 'Settimana gratuita - Hai invitato un amico!', result.rows[0].id);
+    // Crea reward anche per il nuovo iscritto
+    await createReward(referredPhone, 'welcome_bonus', 'Bonus benvenuto - Sei stato invitato da un amico!', result.rows[0].id);
+  }
+
+  return result.rows[0];
+}
+
+async function getReferralStats(phone) {
+  const result = await pool.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE status = 'pending') as pending,
+      COUNT(*) FILTER (WHERE status = 'registered') as registered,
+      COUNT(*) FILTER (WHERE status = 'completed') as completed,
+      COUNT(*) as total_invites
+    FROM referrals
+    WHERE referrer_phone = $1
+  `, [phone]);
+  return result.rows[0];
+}
+
+async function getMyReferrals(phone) {
+  const result = await pool.query(`
+    SELECT r.*, c.name as referred_name
+    FROM referrals r
+    LEFT JOIN clients c ON r.referred_phone = c.phone
+    WHERE r.referrer_phone = $1
+    ORDER BY r.created_at DESC
+  `, [phone]);
+  return result.rows;
+}
+
+async function getAllReferrals() {
+  const result = await pool.query(`
+    SELECT
+      r.*,
+      c1.name as referrer_name,
+      c2.name as referred_name
+    FROM referrals r
+    LEFT JOIN clients c1 ON r.referrer_phone = c1.phone
+    LEFT JOIN clients c2 ON r.referred_phone = c2.phone
+    ORDER BY r.created_at DESC
+  `);
+  return result.rows;
+}
+
+async function getReferralLeaderboard(limit = 10) {
+  const result = await pool.query(`
+    SELECT
+      r.referrer_phone as phone,
+      c.name,
+      COUNT(*) FILTER (WHERE r.status = 'completed') as completed_referrals,
+      COUNT(*) as total_referrals
+    FROM referrals r
+    JOIN clients c ON r.referrer_phone = c.phone
+    GROUP BY r.referrer_phone, c.name
+    HAVING COUNT(*) FILTER (WHERE r.status = 'completed') > 0
+    ORDER BY completed_referrals DESC
+    LIMIT $1
+  `, [limit]);
+  return result.rows;
+}
+
+// ========== REWARDS ==========
+
+async function createReward(phone, rewardType, description, referralId = null) {
+  // Scadenza tra 90 giorni
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 90);
+
+  const result = await pool.query(`
+    INSERT INTO rewards (phone, reward_type, description, referral_id, expires_at)
+    VALUES ($1, $2, $3, $4, $5)
+    RETURNING *
+  `, [phone, rewardType, description, referralId, expiresAt]);
+  return result.rows[0];
+}
+
+async function getRewards(phone) {
+  const result = await pool.query(`
+    SELECT * FROM rewards
+    WHERE phone = $1
+    ORDER BY created_at DESC
+  `, [phone]);
+  return result.rows;
+}
+
+async function getUnclaimedRewards(phone) {
+  const result = await pool.query(`
+    SELECT * FROM rewards
+    WHERE phone = $1 AND claimed = FALSE AND (expires_at IS NULL OR expires_at > NOW())
+    ORDER BY created_at DESC
+  `, [phone]);
+  return result.rows;
+}
+
+async function claimReward(rewardId, phone) {
+  const result = await pool.query(`
+    UPDATE rewards
+    SET claimed = TRUE, claimed_at = CURRENT_TIMESTAMP
+    WHERE id = $1 AND phone = $2 AND claimed = FALSE
+    RETURNING *
+  `, [rewardId, phone]);
+  return result.rows[0];
+}
+
+async function getAllRewardsStats() {
+  const result = await pool.query(`
+    SELECT
+      COUNT(*) as total_rewards,
+      COUNT(*) FILTER (WHERE claimed = TRUE) as claimed,
+      COUNT(*) FILTER (WHERE claimed = FALSE AND (expires_at IS NULL OR expires_at > NOW())) as pending,
+      COUNT(*) FILTER (WHERE expires_at < NOW() AND claimed = FALSE) as expired
+    FROM rewards
+  `);
+  return result.rows[0];
+}
+
 // ========== STATS ==========
 
 async function getStats() {
@@ -380,6 +578,21 @@ module.exports = {
   getCheckinStats,
   getCheckinStreak,
   getAllCheckinsToday,
+  // Referrals
+  createReferralCode,
+  getReferralByCode,
+  useReferralCode,
+  completeReferral,
+  getReferralStats,
+  getMyReferrals,
+  getAllReferrals,
+  getReferralLeaderboard,
+  // Rewards
+  createReward,
+  getRewards,
+  getUnclaimedRewards,
+  claimReward,
+  getAllRewardsStats,
   // Config
   getConfig,
   setConfig,
