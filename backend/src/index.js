@@ -913,13 +913,25 @@ app.get('/api/whatsapp/qrcode', async (req, res) => {
       {
         instanceName: INSTANCE_NAME,
         integration: 'WHATSAPP-BAILEYS',
-        qrcode: true,
-        webhook: `http://backend:3000/webhook`,
-        webhookByEvents: true,
-        webhookEvents: ['messages.upsert']
+        qrcode: true
       },
       { headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY } }
     );
+
+    // After creation, get the QR code by connecting
+    if (!createResponse.data.qrcode?.base64 && !createResponse.data.base64) {
+      // Wait a moment for instance to initialize
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const connectResponse = await axios.get(
+        `${EVOLUTION_API_URL}/instance/connect/${INSTANCE_NAME}`,
+        { headers: { 'apikey': EVOLUTION_API_KEY } }
+      );
+      return res.json({
+        connected: false,
+        qrcode: connectResponse.data.qrcode?.base64 || connectResponse.data.base64 || null,
+        pairingCode: connectResponse.data.pairingCode
+      });
+    }
 
     res.json({
       connected: false,
