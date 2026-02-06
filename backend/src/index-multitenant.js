@@ -622,9 +622,16 @@ app.get('/api/workouts', legacyTenant, async (req, res) => {
   try {
     const plans = await db.getAllWorkoutPlans(req.tenantId);
     res.json(plans.map(p => ({
-      ...p,
-      client_name: p.client_name || 'Sconosciuto',
-      workouts: typeof p.workouts === 'string' ? JSON.parse(p.workouts) : p.workouts
+      id: p.id,
+      phone: p.phone,
+      clientName: p.client_name || 'Sconosciuto',
+      objective: p.objective,
+      experience: p.experience,
+      daysPerWeek: p.days_per_week,
+      limitations: p.limitations,
+      workouts: typeof p.workouts === 'string' ? JSON.parse(p.workouts) : p.workouts,
+      notes: p.notes,
+      createdAt: p.created_at
     })));
   } catch (error) {
     console.error('Errore workouts:', error);
