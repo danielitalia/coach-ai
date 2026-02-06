@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom'
 import {
   Users, MessageSquare, BarChart3, Settings as SettingsIcon,
   Dumbbell, Menu, X, Phone, Clock, TrendingUp,
-  UserPlus, Activity, Calendar, Bell, Smartphone, QrCode, Gift
+  UserPlus, Activity, Calendar, Bell, Smartphone, QrCode, Gift,
+  LogOut, User, ChevronDown
 } from 'lucide-react'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import LoginPage from './components/LoginPage'
 import ClientList from './components/ClientList'
 import Conversations from './components/Conversations'
 import Analytics from './components/Analytics'
@@ -15,8 +18,32 @@ import WhatsAppConnect from './components/WhatsAppConnect'
 import CheckIn from './components/CheckIn'
 import Referral from './components/Referral'
 
+// Protected Route component
+function ProtectedRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-500">Caricamento...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+
+  return children
+}
+
 function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
   const location = useLocation()
+  const { logout, user, tenant } = useAuth()
+  const [showUserMenu, setShowUserMenu] = useState(false)
 
   const links = [
     { to: '/', icon: BarChart3, label: 'Dashboard' },
@@ -29,6 +56,10 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
     { to: '/whatsapp', icon: Smartphone, label: 'WhatsApp' },
     { to: '/settings', icon: SettingsIcon, label: 'Impostazioni' },
   ]
+
+  const handleLogout = async () => {
+    await logout()
+  }
 
   return (
     <>
@@ -44,7 +75,7 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
       <aside className={`
         fixed top-0 left-0 z-30 h-full w-64 bg-white border-r border-gray-200
         transform transition-transform duration-200 ease-in-out
-        lg:translate-x-0 lg:static
+        lg:translate-x-0 lg:static flex flex-col
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         <div className="flex items-center gap-3 p-6 border-b border-gray-200">
@@ -57,7 +88,7 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
           </div>
         </div>
 
-        <nav className="p-4 space-y-1">
+        <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
           {links.map(({ to, icon: Icon, label }) => (
             <Link
               key={to}
@@ -76,7 +107,8 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
           ))}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200">
+        {/* WhatsApp Status */}
+        <div className="p-4 border-t border-gray-200">
           <Link
             to="/whatsapp"
             onClick={() => setIsOpen(false)}
@@ -100,12 +132,44 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
             </span>
           </Link>
         </div>
+
+        {/* User Menu */}
+        <div className="p-4 border-t border-gray-200">
+          <div className="relative">
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
+                <User className="w-4 h-4 text-primary-600" />
+              </div>
+              <div className="flex-1 text-left">
+                <p className="text-sm font-medium text-gray-900 truncate">{user?.name || 'Utente'}</p>
+                <p className="text-xs text-gray-500 truncate">{tenant?.name || 'Palestra'}</p>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
+            </button>
+
+            {showUserMenu && (
+              <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="text-sm font-medium">Esci</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </aside>
     </>
   )
 }
 
 function Dashboard() {
+  const { tenant } = useAuth()
   const [stats, setStats] = useState({
     totalClients: 0,
     activeToday: 0,
@@ -115,7 +179,6 @@ function Dashboard() {
   const [recentClients, setRecentClients] = useState([])
 
   useEffect(() => {
-    // Fetch stats from API
     fetchStats()
   }, [])
 
@@ -128,18 +191,6 @@ function Dashboard() {
       }
     } catch (err) {
       console.log('Stats API not available yet')
-      // Demo data
-      setStats({
-        totalClients: 24,
-        activeToday: 8,
-        messagesThisWeek: 156,
-        responseRate: 94
-      })
-      setRecentClients([
-        { phone: '393920434058', name: 'Daniel Ramos', lastMessage: 'Ciao', timestamp: new Date() },
-        { phone: '393331234567', name: 'Mario Rossi', lastMessage: 'Quando apre la palestra?', timestamp: new Date(Date.now() - 3600000) },
-        { phone: '393389876543', name: 'Laura Bianchi', lastMessage: 'Grazie per la scheda!', timestamp: new Date(Date.now() - 7200000) },
-      ])
     }
   }
 
@@ -161,7 +212,7 @@ function Dashboard() {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-gray-900">Dashboard</h2>
-        <p className="text-gray-500">Panoramica delle attivita del tuo Coach AI</p>
+        <p className="text-gray-500">Panoramica delle attivita di {tenant?.name || 'Coach AI'}</p>
       </div>
 
       {/* Stats Grid */}
@@ -189,24 +240,31 @@ function Dashboard() {
             <h3 className="font-semibold text-gray-900">Conversazioni Recenti</h3>
           </div>
           <div className="divide-y divide-gray-100">
-            {recentClients.map((client, i) => (
-              <div key={i} className="p-4 hover:bg-gray-50 transition-colors">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
-                    <span className="text-primary-700 font-medium">
-                      {client.name.charAt(0)}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-900">{client.name}</p>
-                    <p className="text-sm text-gray-500 truncate">{client.lastMessage}</p>
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    {formatTime(client.timestamp)}
+            {recentClients.length === 0 ? (
+              <div className="p-6 text-center text-gray-500">
+                <MessageSquare className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                <p>Nessuna conversazione recente</p>
+              </div>
+            ) : (
+              recentClients.map((client, i) => (
+                <div key={i} className="p-4 hover:bg-gray-50 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
+                      <span className="text-primary-700 font-medium">
+                        {client.name?.charAt(0) || '?'}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900">{client.name}</p>
+                      <p className="text-sm text-gray-500 truncate">{client.lastMessage}</p>
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {formatTime(client.timestamp)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
           <Link
             to="/conversations"
@@ -222,25 +280,25 @@ function Dashboard() {
             <h3 className="font-semibold text-gray-900">Azioni Rapide</h3>
           </div>
           <div className="p-4 space-y-3">
-            <button className="w-full flex items-center gap-4 p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+            <Link to="/clients" className="w-full flex items-center gap-4 p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
               <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
                 <UserPlus className="w-5 h-5 text-blue-600" />
               </div>
               <div className="text-left">
-                <p className="font-medium text-gray-900">Invita Nuovo Cliente</p>
-                <p className="text-sm text-gray-500">Invia messaggio di benvenuto</p>
+                <p className="font-medium text-gray-900">Gestisci Clienti</p>
+                <p className="text-sm text-gray-500">Vedi lista clienti</p>
               </div>
-            </button>
-            <button className="w-full flex items-center gap-4 p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+            </Link>
+            <Link to="/reminders" className="w-full flex items-center gap-4 p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
               <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
                 <Calendar className="w-5 h-5 text-green-600" />
               </div>
               <div className="text-left">
                 <p className="font-medium text-gray-900">Promemoria Allenamento</p>
-                <p className="text-sm text-gray-500">Invia reminder ai clienti</p>
+                <p className="text-sm text-gray-500">Configura reminder</p>
               </div>
-            </button>
-            <button className="w-full flex items-center gap-4 p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+            </Link>
+            <Link to="/workouts" className="w-full flex items-center gap-4 p-4 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
               <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
                 <Dumbbell className="w-5 h-5 text-purple-600" />
               </div>
@@ -248,7 +306,7 @@ function Dashboard() {
                 <p className="font-medium text-gray-900">Genera Scheda</p>
                 <p className="text-sm text-gray-500">Crea scheda allenamento</p>
               </div>
-            </button>
+            </Link>
           </div>
         </div>
       </div>
@@ -270,10 +328,10 @@ function formatTime(date) {
   return d.toLocaleDateString('it-IT')
 }
 
-
-function App() {
+function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [whatsappStatus, setWhatsappStatus] = useState({ connected: false })
+  const { tenant } = useAuth()
 
   // Check WhatsApp status periodically
   useEffect(() => {
@@ -290,50 +348,84 @@ function App() {
     }
 
     checkWhatsAppStatus()
-    const interval = setInterval(checkWhatsAppStatus, 30000) // Check every 30 seconds
+    const interval = setInterval(checkWhatsAppStatus, 30000)
     return () => clearInterval(interval)
   }, [])
 
   return (
-    <BrowserRouter>
-      <div className="min-h-screen bg-gray-50">
-        <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} whatsappStatus={whatsappStatus} />
+    <div className="min-h-screen bg-gray-50">
+      <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} whatsappStatus={whatsappStatus} />
 
-        {/* Main content */}
-        <div className="lg:ml-64">
-          {/* Top bar */}
-          <header className="bg-white border-b border-gray-200 px-4 py-4 lg:px-8">
-            <div className="flex items-center justify-between">
-              <button
-                className="lg:hidden p-2 hover:bg-gray-100 rounded-lg"
-                onClick={() => setSidebarOpen(true)}
-              >
-                <Menu className="w-6 h-6 text-gray-600" />
-              </button>
-              <div className="flex items-center gap-4">
-                <span className="text-sm text-gray-500">Centro Fitness Amati</span>
-              </div>
+      {/* Main content */}
+      <div className="lg:ml-64">
+        {/* Top bar */}
+        <header className="bg-white border-b border-gray-200 px-4 py-4 lg:px-8">
+          <div className="flex items-center justify-between">
+            <button
+              className="lg:hidden p-2 hover:bg-gray-100 rounded-lg"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu className="w-6 h-6 text-gray-600" />
+            </button>
+            <div className="flex items-center gap-4">
+              <span className="text-sm text-gray-500">{tenant?.name || 'Coach AI'}</span>
             </div>
-          </header>
+          </div>
+        </header>
 
-          {/* Page content */}
-          <main className="p-4 lg:p-8">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/clients" element={<ClientList />} />
-              <Route path="/conversations" element={<Conversations />} />
-              <Route path="/workouts" element={<WorkoutPlans />} />
-              <Route path="/checkin" element={<CheckIn />} />
-              <Route path="/referral" element={<Referral />} />
-              <Route path="/reminders" element={<Reminders />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/whatsapp" element={<WhatsAppConnect />} />
-            </Routes>
-          </main>
-        </div>
+        {/* Page content */}
+        <main className="p-4 lg:p-8">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/clients" element={<ClientList />} />
+            <Route path="/conversations" element={<Conversations />} />
+            <Route path="/workouts" element={<WorkoutPlans />} />
+            <Route path="/checkin" element={<CheckIn />} />
+            <Route path="/referral" element={<Referral />} />
+            <Route path="/reminders" element={<Reminders />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/whatsapp" element={<WhatsAppConnect />} />
+          </Routes>
+        </main>
       </div>
+    </div>
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPageWrapper />} />
+          <Route path="/*" element={
+            <ProtectedRoute>
+              <MainLayout />
+            </ProtectedRoute>
+          } />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   )
+}
+
+// Wrapper per redirect se già autenticato
+function LoginPageWrapper() {
+  const { isAuthenticated, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />
+  }
+
+  return <LoginPage />
 }
 
 export default App
