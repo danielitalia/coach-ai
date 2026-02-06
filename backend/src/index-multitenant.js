@@ -817,6 +817,367 @@ app.get('/api/legacy/referrals', legacyTenant, async (req, res) => {
   }
 });
 
+// ========== ALIAS LEGACY PER DASHBOARD ESISTENTE ==========
+
+// Stats alias
+app.get('/api/stats', legacyTenant, async (req, res) => {
+  try {
+    const stats = await db.getStats(req.tenantId);
+    const checkinStats = await db.getCheckinStatsGlobal(req.tenantId);
+    const referralStats = await db.getReferralStatsGlobal(req.tenantId);
+    res.json({
+      totalClients: parseInt(stats.total_clients) || 0,
+      activeToday: parseInt(stats.active_today) || 0,
+      messagesThisWeek: parseInt(stats.messages_this_week) || 0,
+      responseRate: 95,
+      checkins: checkinStats,
+      referrals: referralStats
+    });
+  } catch (error) {
+    console.error('Errore stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Clients alias (senza auth per dashboard legacy)
+app.get('/api/clients', legacyTenant, async (req, res) => {
+  try {
+    const clients = await db.getAllClients(req.tenantId);
+    res.json(clients.map(c => ({
+      phone: c.phone,
+      name: c.name,
+      status: c.last_activity && new Date(c.last_activity) > new Date(Date.now() - 7*24*60*60*1000) ? 'active' : 'inactive',
+      objective: c.objective,
+      experience: c.experience,
+      daysPerWeek: c.days_per_week,
+      lastContact: c.last_activity,
+      createdAt: c.created_at
+    })));
+  } catch (error) {
+    console.error('Errore clients:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Conversations alias
+app.get('/api/conversations', legacyTenant, async (req, res) => {
+  try {
+    const clients = await db.getAllClients(req.tenantId);
+    res.json(clients.map(c => ({
+      phone: c.phone,
+      name: c.name,
+      lastMessage: '',
+      timestamp: c.last_activity
+    })));
+  } catch (error) {
+    console.error('Errore conversations:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/conversations/:phone', legacyTenant, async (req, res) => {
+  try {
+    const messages = await db.getClientMessages(req.tenantId, req.params.phone);
+    res.json(messages);
+  } catch (error) {
+    console.error('Errore conversation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check-in QR code alias
+app.get('/api/checkin-qrcode', legacyTenant, async (req, res) => {
+  try {
+    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+
+    const statusResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => null);
+
+    if (statusResponse?.data?.state !== 'open') {
+      return res.status(400).json({ error: 'WhatsApp non connesso' });
+    }
+
+    const fetchResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/fetchInstances`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    );
+
+    const instances = fetchResponse.data || [];
+    const instance = instances.find(i => i.instance?.instanceName === instanceName);
+
+    let ownerNumber = null;
+    if (instance?.instance?.owner) {
+      ownerNumber = instance.instance.owner.replace('@s.whatsapp.net', '');
+    }
+
+    if (!ownerNumber) {
+      return res.status(400).json({ error: 'Numero WhatsApp non trovato' });
+    }
+
+    const checkinMessage = encodeURIComponent('check-in');
+    const whatsappUrl = `https://wa.me/${ownerNumber}?text=${checkinMessage}`;
+
+    res.json({
+      success: true,
+      whatsappNumber: ownerNumber,
+      whatsappUrl,
+      qrCodeData: whatsappUrl
+    });
+  } catch (error) {
+    console.error('Errore QR code:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Checkins today alias
+app.get('/api/checkins/today', legacyTenant, async (req, res) => {
+  try {
+    const checkins = await db.getRecentCheckins(req.tenantId, 50);
+    const today = new Date().toDateString();
+    const todayCheckins = checkins.filter(c => new Date(c.check_in_time).toDateString() === today);
+    res.json(todayCheckins);
+  } catch (error) {
+    console.error('Errore checkins today:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Checkins stats alias
+app.get('/api/checkins-stats', legacyTenant, async (req, res) => {
+  try {
+    const stats = await db.getCheckinStatsGlobal(req.tenantId);
+    res.json(stats);
+  } catch (error) {
+    console.error('Errore checkins stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Workouts alias
+app.get('/api/workouts', legacyTenant, async (req, res) => {
+  try {
+    const plans = await db.pool.query(`
+      SELECT wp.*, c.name as client_name
+      FROM workout_plans wp
+      LEFT JOIN clients c ON c.phone = wp.phone AND c.tenant_id = wp.tenant_id
+      WHERE wp.tenant_id = $1
+      ORDER BY wp.created_at DESC
+    `, [req.tenantId]);
+    res.json(plans.rows);
+  } catch (error) {
+    console.error('Errore workouts:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/workouts-stats', legacyTenant, async (req, res) => {
+  try {
+    const result = await db.pool.query(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(CASE WHEN sent_at IS NOT NULL THEN 1 END) as sent,
+        COUNT(CASE WHEN created_at > NOW() - INTERVAL '7 days' THEN 1 END) as this_week
+      FROM workout_plans WHERE tenant_id = $1
+    `, [req.tenantId]);
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Errore workouts stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reminders alias
+app.get('/api/reminders/config', legacyTenant, async (req, res) => {
+  try {
+    const config = await db.getConfig(req.tenantId, 'reminders');
+    res.json(config || {
+      enabled: true,
+      thresholds: [
+        { days: 3, message: "Ciao! Non ti vediamo da qualche giorno." },
+        { days: 7, message: "Ehi! È passata una settimana!" },
+        { days: 14, message: "Ciao! Sono passate due settimane..." }
+      ]
+    });
+  } catch (error) {
+    console.error('Errore reminders config:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/reminders/stats', legacyTenant, async (req, res) => {
+  try {
+    const result = await db.pool.query(`
+      SELECT COUNT(*) as total FROM sent_reminders WHERE tenant_id = $1
+    `, [req.tenantId]);
+    res.json({ total: parseInt(result.rows[0].total) });
+  } catch (error) {
+    console.error('Errore reminders stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/reminders/config', legacyTenant, async (req, res) => {
+  try {
+    await db.setConfig(req.tenantId, 'reminders', req.body);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Errore save reminders config:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/reminders/check', legacyTenant, async (req, res) => {
+  try {
+    // Placeholder - reminder check logic
+    res.json({ sent: 0 });
+  } catch (error) {
+    console.error('Errore check reminders:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// AI config alias
+app.get('/api/ai/config', legacyTenant, async (req, res) => {
+  try {
+    res.json({
+      coachName: req.tenant?.coach_name || 'Coach AI',
+      useEmoji: req.tenant?.use_emoji !== false,
+      customPrompt: req.tenant?.custom_system_prompt || ''
+    });
+  } catch (error) {
+    console.error('Errore AI config:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/ai/preview', legacyTenant, async (req, res) => {
+  try {
+    const prompt = getSystemPrompt(req.tenant);
+    res.json({ prompt });
+  } catch (error) {
+    console.error('Errore AI preview:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/ai/config', legacyTenant, async (req, res) => {
+  try {
+    await db.updateTenant(req.tenantId, {
+      coachName: req.body.coachName,
+      useEmoji: req.body.useEmoji,
+      customSystemPrompt: req.body.customPrompt
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Errore save AI config:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/ai/reset', legacyTenant, async (req, res) => {
+  try {
+    await db.updateTenant(req.tenantId, {
+      coachName: 'Coach AI',
+      useEmoji: true,
+      customSystemPrompt: null
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Errore reset AI:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// WhatsApp info alias
+app.get('/api/whatsapp/info', legacyTenant, async (req, res) => {
+  try {
+    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+
+    const fetchResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/fetchInstances`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => ({ data: [] }));
+
+    const instance = (fetchResponse.data || []).find(i => i.instance?.instanceName === instanceName);
+
+    res.json({
+      instanceName,
+      owner: instance?.instance?.owner?.replace('@s.whatsapp.net', '') || null,
+      profileName: instance?.instance?.profileName || null
+    });
+  } catch (error) {
+    console.error('Errore WhatsApp info:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// WhatsApp QR code alias
+app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
+  try {
+    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+
+    const statusResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => null);
+
+    if (statusResponse?.data?.state === 'open') {
+      return res.json({ connected: true });
+    }
+
+    const qrResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => null);
+
+    res.json({
+      connected: false,
+      qrcode: qrResponse?.data?.base64 || qrResponse?.data?.qrcode?.base64,
+      pairingCode: qrResponse?.data?.pairingCode
+    });
+  } catch (error) {
+    console.error('Errore WhatsApp QR:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// WhatsApp disconnect alias
+app.post('/api/whatsapp/disconnect', legacyTenant, async (req, res) => {
+  try {
+    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+
+    await axios.delete(
+      `${EVOLUTION_API_URL}/instance/logout/${instanceName}`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => null);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Errore WhatsApp disconnect:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// WhatsApp restart alias
+app.post('/api/whatsapp/restart', legacyTenant, async (req, res) => {
+  try {
+    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+
+    await axios.put(
+      `${EVOLUTION_API_URL}/instance/restart/${instanceName}`,
+      {},
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => null);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Errore WhatsApp restart:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // QR Code checkin (legacy)
 app.get('/api/legacy/checkin/qrcode', legacyTenant, async (req, res) => {
   try {
