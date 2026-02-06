@@ -732,11 +732,18 @@ app.get('/api/reminders/config', requireTenant, async (req, res) => {
 
 const DEFAULT_TENANT_ID = 'a0000000-0000-0000-0000-000000000001';
 
-app.get('/api/whatsapp/status', async (req, res) => {
+// Middleware helper per retrocompatibilità
+const legacyTenant = async (req, res, next) => {
+  const tenantId = req.headers['x-tenant-id'] || DEFAULT_TENANT_ID;
+  req.tenantId = tenantId;
+  req.tenant = await db.getTenant(tenantId);
+  next();
+};
+
+// WhatsApp status (legacy)
+app.get('/api/whatsapp/status', legacyTenant, async (req, res) => {
   try {
-    const tenantId = req.headers['x-tenant-id'] || DEFAULT_TENANT_ID;
-    const tenant = await db.getTenant(tenantId);
-    const instanceName = tenant?.whatsapp_instance_name || 'coach-ai';
+    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
 
     const response = await axios.get(
       `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
@@ -751,6 +758,108 @@ app.get('/api/whatsapp/status', async (req, res) => {
   } catch (error) {
     console.error('Errore status WhatsApp:', error);
     res.json({ connected: false, state: 'error' });
+  }
+});
+
+// Clients (legacy - senza auth)
+app.get('/api/legacy/clients', legacyTenant, async (req, res) => {
+  try {
+    const clients = await db.getAllClients(req.tenantId);
+    res.json(clients);
+  } catch (error) {
+    console.error('Errore clients legacy:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Stats (legacy)
+app.get('/api/legacy/stats', legacyTenant, async (req, res) => {
+  try {
+    const stats = await db.getStats(req.tenantId);
+    const checkinStats = await db.getCheckinStatsGlobal(req.tenantId);
+    const referralStats = await db.getReferralStatsGlobal(req.tenantId);
+    res.json({
+      ...stats,
+      checkins: checkinStats,
+      referrals: referralStats
+    });
+  } catch (error) {
+    console.error('Errore stats legacy:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Checkins (legacy)
+app.get('/api/legacy/checkins', legacyTenant, async (req, res) => {
+  try {
+    const phone = req.query.phone;
+    if (phone) {
+      const checkins = await db.getClientCheckins(req.tenantId, phone);
+      res.json(checkins);
+    } else {
+      const checkins = await db.getRecentCheckins(req.tenantId, 50);
+      res.json(checkins);
+    }
+  } catch (error) {
+    console.error('Errore checkins legacy:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Referrals (legacy)
+app.get('/api/legacy/referrals', legacyTenant, async (req, res) => {
+  try {
+    const stats = await db.getReferralStatsGlobal(req.tenantId);
+    res.json(stats);
+  } catch (error) {
+    console.error('Errore referrals legacy:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// QR Code checkin (legacy)
+app.get('/api/legacy/checkin/qrcode', legacyTenant, async (req, res) => {
+  try {
+    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+
+    const statusResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => null);
+
+    if (statusResponse?.data?.state !== 'open') {
+      return res.status(400).json({ error: 'WhatsApp non connesso' });
+    }
+
+    const fetchResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/fetchInstances`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    );
+
+    const instances = fetchResponse.data || [];
+    const instance = instances.find(i => i.instance?.instanceName === instanceName);
+
+    let ownerNumber = null;
+    if (instance?.instance?.owner) {
+      ownerNumber = instance.instance.owner.replace('@s.whatsapp.net', '');
+    }
+
+    if (!ownerNumber) {
+      return res.status(400).json({ error: 'Numero WhatsApp non trovato' });
+    }
+
+    const checkinMessage = encodeURIComponent('check-in');
+    const whatsappUrl = `https://wa.me/${ownerNumber}?text=${checkinMessage}`;
+
+    res.json({
+      success: true,
+      whatsappNumber: ownerNumber,
+      whatsappUrl,
+      qrCodeData: whatsappUrl
+    });
+  } catch (error) {
+    console.error('Errore QR code legacy:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
