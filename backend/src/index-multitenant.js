@@ -500,7 +500,44 @@ function parseWorkoutFromText(text) {
   return workouts;
 }
 
-// ========== API ROUTES (con tenant) ==========
+// ========== RETROCOMPATIBILITÀ ==========
+
+// Per permettere transizione graduale, manteniamo endpoint senza auth
+// che usano il tenant di default
+
+const DEFAULT_TENANT_ID = 'a0000000-0000-0000-0000-000000000001';
+
+// Middleware helper per retrocompatibilità (permette auth JWT o accesso legacy)
+const legacyTenant = async (req, res, next) => {
+  try {
+    // Prima prova autenticazione JWT
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const { verifyToken } = require('./middleware/auth');
+      const token = authHeader.split(' ')[1];
+      const decoded = verifyToken(token);
+      if (decoded && decoded.tenantId) {
+        req.tenantId = decoded.tenantId;
+        req.tenant = await db.getTenant(decoded.tenantId);
+        req.user = await db.getUserById(decoded.userId);
+        return next();
+      }
+    }
+
+    // Fallback: usa tenant da header o default
+    const tenantId = req.headers['x-tenant-id'] || DEFAULT_TENANT_ID;
+    req.tenantId = tenantId;
+    req.tenant = await db.getTenant(tenantId);
+    next();
+  } catch (error) {
+    // In caso di errore, usa comunque il tenant default
+    req.tenantId = DEFAULT_TENANT_ID;
+    req.tenant = await db.getTenant(DEFAULT_TENANT_ID);
+    next();
+  }
+};
+
+// ========== API ROUTES ==========
 
 // Stats
 app.get('/api/stats', legacyTenant, async (req, res) => {
@@ -725,44 +762,9 @@ app.get('/api/reminders/config', legacyTenant, async (req, res) => {
   }
 });
 
-// ========== RETROCOMPATIBILITÀ (senza auth per transizione) ==========
+// ========== WHATSAPP API ==========
 
-// Per permettere transizione graduale, manteniamo endpoint senza auth
-// che usano il tenant di default
-
-const DEFAULT_TENANT_ID = 'a0000000-0000-0000-0000-000000000001';
-
-// Middleware helper per retrocompatibilità (permette auth JWT o accesso legacy)
-const legacyTenant = async (req, res, next) => {
-  try {
-    // Prima prova autenticazione JWT
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const { verifyToken } = require('./middleware/auth');
-      const token = authHeader.split(' ')[1];
-      const decoded = verifyToken(token);
-      if (decoded && decoded.tenantId) {
-        req.tenantId = decoded.tenantId;
-        req.tenant = await db.getTenant(decoded.tenantId);
-        req.user = await db.getUserById(decoded.userId);
-        return next();
-      }
-    }
-
-    // Fallback: usa tenant da header o default
-    const tenantId = req.headers['x-tenant-id'] || DEFAULT_TENANT_ID;
-    req.tenantId = tenantId;
-    req.tenant = await db.getTenant(tenantId);
-    next();
-  } catch (error) {
-    // In caso di errore, usa comunque il tenant default
-    req.tenantId = DEFAULT_TENANT_ID;
-    req.tenant = await db.getTenant(DEFAULT_TENANT_ID);
-    next();
-  }
-};
-
-// WhatsApp status (legacy)
+// WhatsApp status
 app.get('/api/whatsapp/status', legacyTenant, async (req, res) => {
   try {
     const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
