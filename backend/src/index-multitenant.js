@@ -623,6 +623,7 @@ app.get('/api/workouts', legacyTenant, async (req, res) => {
     const plans = await db.getAllWorkoutPlans(req.tenantId);
     res.json(plans.map(p => ({
       ...p,
+      client_name: p.client_name || 'Sconosciuto',
       workouts: typeof p.workouts === 'string' ? JSON.parse(p.workouts) : p.workouts
     })));
   } catch (error) {
@@ -979,33 +980,21 @@ app.get('/api/checkins-stats', legacyTenant, async (req, res) => {
   }
 });
 
-// Workouts alias
-app.get('/api/workouts', legacyTenant, async (req, res) => {
-  try {
-    const plans = await db.pool.query(`
-      SELECT wp.*, c.name as client_name
-      FROM workout_plans wp
-      LEFT JOIN clients c ON c.phone = wp.phone AND c.tenant_id = wp.tenant_id
-      WHERE wp.tenant_id = $1
-      ORDER BY wp.created_at DESC
-    `, [req.tenantId]);
-    res.json(plans.rows);
-  } catch (error) {
-    console.error('Errore workouts:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+// Note: /api/workouts è già definito sopra con legacyTenant
 
 app.get('/api/workouts-stats', legacyTenant, async (req, res) => {
   try {
     const result = await db.pool.query(`
       SELECT
         COUNT(*) as total,
-        COUNT(CASE WHEN sent_at IS NOT NULL THEN 1 END) as sent,
         COUNT(CASE WHEN created_at > NOW() - INTERVAL '7 days' THEN 1 END) as this_week
       FROM workout_plans WHERE tenant_id = $1
     `, [req.tenantId]);
-    res.json(result.rows[0]);
+    res.json({
+      total: parseInt(result.rows[0].total) || 0,
+      sent: parseInt(result.rows[0].total) || 0,
+      this_week: parseInt(result.rows[0].this_week) || 0
+    });
   } catch (error) {
     console.error('Errore workouts stats:', error);
     res.status(500).json({ error: error.message });
