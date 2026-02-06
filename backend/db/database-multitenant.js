@@ -16,14 +16,20 @@ const pool = new Pool({
 async function initDatabase() {
   const client = await pool.connect();
   try {
-    // Prima esegui lo schema base
-    const schemaPath = path.join(__dirname, 'schema.sql');
-    if (fs.existsSync(schemaPath)) {
-      const schema = fs.readFileSync(schemaPath, 'utf8');
-      await client.query(schema);
+    // Verifica se il database è già stato migrato a multi-tenant
+    const checkResult = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables
+        WHERE table_name = 'tenants'
+      ) as tenants_exist
+    `);
+
+    if (checkResult.rows[0].tenants_exist) {
+      console.log('Database multi-tenant già inizializzato');
+      return;
     }
 
-    // Poi esegui lo schema multi-tenant
+    // Se non esiste, esegui solo lo schema multi-tenant (include tutto)
     const multitenantPath = path.join(__dirname, 'schema-multitenant.sql');
     if (fs.existsSync(multitenantPath)) {
       const multitenantSchema = fs.readFileSync(multitenantPath, 'utf8');
