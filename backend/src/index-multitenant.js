@@ -503,7 +503,7 @@ function parseWorkoutFromText(text) {
 // ========== API ROUTES (con tenant) ==========
 
 // Stats
-app.get('/api/stats', requireTenant, async (req, res) => {
+app.get('/api/stats', legacyTenant, async (req, res) => {
   try {
     const stats = await db.getStats(req.tenantId);
     const totalMessages = parseInt(stats.messages_this_week) || 0;
@@ -521,8 +521,8 @@ app.get('/api/stats', requireTenant, async (req, res) => {
   }
 });
 
-// Clients
-app.get('/api/clients', requireTenant, async (req, res) => {
+// Clients (supporta sia auth che legacy)
+app.get('/api/clients', legacyTenant, async (req, res) => {
   try {
     const clients = await db.getAllClients(req.tenantId);
     res.json(clients.map(c => ({
@@ -541,8 +541,8 @@ app.get('/api/clients', requireTenant, async (req, res) => {
   }
 });
 
-// Conversations
-app.get('/api/conversations', requireTenant, async (req, res) => {
+// Conversations (supporta sia auth che legacy)
+app.get('/api/conversations', legacyTenant, async (req, res) => {
   try {
     const conversations = await db.getConversationsList(req.tenantId);
     res.json(conversations.map(c => ({
@@ -558,8 +558,8 @@ app.get('/api/conversations', requireTenant, async (req, res) => {
   }
 });
 
-// Messages for a conversation
-app.get('/api/conversations/:phone', requireTenant, async (req, res) => {
+// Messages for a conversation (supporta sia auth che legacy)
+app.get('/api/conversations/:phone', legacyTenant, async (req, res) => {
   try {
     const messages = await db.getMessages(req.tenantId, req.params.phone, 100);
     const client = await db.getClient(req.tenantId, req.params.phone);
@@ -580,8 +580,8 @@ app.get('/api/conversations/:phone', requireTenant, async (req, res) => {
   }
 });
 
-// Workouts
-app.get('/api/workouts', requireTenant, async (req, res) => {
+// Workouts (supporta sia auth che legacy)
+app.get('/api/workouts', legacyTenant, async (req, res) => {
   try {
     const plans = await db.getAllWorkoutPlans(req.tenantId);
     res.json(plans.map(p => ({
@@ -594,8 +594,8 @@ app.get('/api/workouts', requireTenant, async (req, res) => {
   }
 });
 
-// Check-ins
-app.get('/api/checkins/today', requireTenant, async (req, res) => {
+// Check-ins (supporta sia auth che legacy)
+app.get('/api/checkins/today', legacyTenant, async (req, res) => {
   try {
     const checkins = await db.getAllCheckinsToday(req.tenantId);
     res.json(checkins);
@@ -605,7 +605,7 @@ app.get('/api/checkins/today', requireTenant, async (req, res) => {
   }
 });
 
-app.get('/api/checkins-stats', requireTenant, async (req, res) => {
+app.get('/api/checkins-stats', legacyTenant, async (req, res) => {
   try {
     const stats = await db.getCheckinStatsGlobal(req.tenantId);
     res.json(stats);
@@ -615,7 +615,7 @@ app.get('/api/checkins-stats', requireTenant, async (req, res) => {
   }
 });
 
-app.get('/api/checkin-qrcode', requireTenant, async (req, res) => {
+app.get('/api/checkin-qrcode', legacyTenant, async (req, res) => {
   try {
     const tenant = req.tenant;
 
@@ -650,7 +650,7 @@ app.get('/api/checkin-qrcode', requireTenant, async (req, res) => {
 });
 
 // Referrals
-app.get('/api/referrals', requireTenant, async (req, res) => {
+app.get('/api/referrals', legacyTenant, async (req, res) => {
   try {
     const referrals = await db.getAllReferrals(req.tenantId);
     res.json(referrals);
@@ -660,7 +660,7 @@ app.get('/api/referrals', requireTenant, async (req, res) => {
   }
 });
 
-app.get('/api/referrals/stats', requireTenant, async (req, res) => {
+app.get('/api/referrals/stats', legacyTenant, async (req, res) => {
   try {
     const stats = await db.getReferralStatsGlobal(req.tenantId);
     res.json(stats);
@@ -670,7 +670,7 @@ app.get('/api/referrals/stats', requireTenant, async (req, res) => {
   }
 });
 
-app.get('/api/referrals/leaderboard', requireTenant, async (req, res) => {
+app.get('/api/referrals/leaderboard', legacyTenant, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
     const leaderboard = await db.getReferralLeaderboard(req.tenantId, limit);
@@ -682,7 +682,7 @@ app.get('/api/referrals/leaderboard', requireTenant, async (req, res) => {
 });
 
 // Rewards
-app.get('/api/rewards', requireTenant, async (req, res) => {
+app.get('/api/rewards', legacyTenant, async (req, res) => {
   try {
     const rewards = await db.getAllRewards(req.tenantId);
     res.json(rewards);
@@ -692,7 +692,7 @@ app.get('/api/rewards', requireTenant, async (req, res) => {
   }
 });
 
-app.post('/api/rewards/:id/claim', requireTenant, async (req, res) => {
+app.post('/api/rewards/:id/claim', legacyTenant, async (req, res) => {
   try {
     const { phone } = req.body;
     const reward = await db.claimReward(req.tenantId, req.params.id, phone);
@@ -707,7 +707,7 @@ app.post('/api/rewards/:id/claim', requireTenant, async (req, res) => {
 });
 
 // Config
-app.get('/api/reminders/config', requireTenant, async (req, res) => {
+app.get('/api/reminders/config', legacyTenant, async (req, res) => {
   try {
     const config = await db.getConfig(req.tenantId, 'reminders');
     res.json(config || {
@@ -732,12 +732,34 @@ app.get('/api/reminders/config', requireTenant, async (req, res) => {
 
 const DEFAULT_TENANT_ID = 'a0000000-0000-0000-0000-000000000001';
 
-// Middleware helper per retrocompatibilità
+// Middleware helper per retrocompatibilità (permette auth JWT o accesso legacy)
 const legacyTenant = async (req, res, next) => {
-  const tenantId = req.headers['x-tenant-id'] || DEFAULT_TENANT_ID;
-  req.tenantId = tenantId;
-  req.tenant = await db.getTenant(tenantId);
-  next();
+  try {
+    // Prima prova autenticazione JWT
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const { verifyToken } = require('./middleware/auth');
+      const token = authHeader.split(' ')[1];
+      const decoded = verifyToken(token);
+      if (decoded && decoded.tenantId) {
+        req.tenantId = decoded.tenantId;
+        req.tenant = await db.getTenant(decoded.tenantId);
+        req.user = await db.getUserById(decoded.userId);
+        return next();
+      }
+    }
+
+    // Fallback: usa tenant da header o default
+    const tenantId = req.headers['x-tenant-id'] || DEFAULT_TENANT_ID;
+    req.tenantId = tenantId;
+    req.tenant = await db.getTenant(tenantId);
+    next();
+  } catch (error) {
+    // In caso di errore, usa comunque il tenant default
+    req.tenantId = DEFAULT_TENANT_ID;
+    req.tenant = await db.getTenant(DEFAULT_TENANT_ID);
+    next();
+  }
 };
 
 // WhatsApp status (legacy)
