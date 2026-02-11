@@ -399,6 +399,15 @@ async function getWorkoutPlan(tenantId, planId) {
   return result.rows[0] || null;
 }
 
+// Ottiene scheda per ID (per link pubblico, senza verifica tenant)
+async function getWorkoutPlanById(planId) {
+  const result = await pool.query(
+    'SELECT wp.*, t.name as tenant_name, t.primary_color FROM workout_plans wp LEFT JOIN tenants t ON wp.tenant_id = t.id WHERE wp.id = $1',
+    [planId]
+  );
+  return result.rows[0] || null;
+}
+
 async function getWorkoutPlansByPhone(tenantId, phone) {
   const result = await pool.query(
     'SELECT * FROM workout_plans WHERE tenant_id = $1 AND phone = $2 ORDER BY created_at DESC',
@@ -440,6 +449,51 @@ async function deleteWorkoutPlan(tenantId, planId) {
     'DELETE FROM workout_plans WHERE tenant_id = $1 AND id = $2 RETURNING *',
     [tenantId, planId]
   );
+  return result.rows[0];
+}
+
+async function updateWorkoutPlan(tenantId, planId, updates) {
+  const fields = [];
+  const values = [];
+  let paramIndex = 1;
+
+  // Campi aggiornabili
+  if (updates.workouts !== undefined) {
+    fields.push(`workouts = $${paramIndex++}`);
+    values.push(JSON.stringify(updates.workouts));
+  }
+  if (updates.notes !== undefined) {
+    fields.push(`notes = $${paramIndex++}`);
+    values.push(updates.notes);
+  }
+  if (updates.objective !== undefined) {
+    fields.push(`objective = $${paramIndex++}`);
+    values.push(updates.objective);
+  }
+  if (updates.daysPerWeek !== undefined) {
+    fields.push(`days_per_week = $${paramIndex++}`);
+    values.push(updates.daysPerWeek);
+  }
+  if (updates.clientName !== undefined) {
+    fields.push(`client_name = $${paramIndex++}`);
+    values.push(updates.clientName);
+  }
+
+  if (fields.length === 0) {
+    return await getWorkoutPlan(tenantId, planId);
+  }
+
+  // Aggiungi updated_at
+  fields.push(`updated_at = NOW()`);
+
+  values.push(tenantId, planId);
+  const result = await pool.query(`
+    UPDATE workout_plans
+    SET ${fields.join(', ')}
+    WHERE tenant_id = $${paramIndex++} AND id = $${paramIndex}
+    RETURNING *
+  `, values);
+
   return result.rows[0];
 }
 
@@ -873,9 +927,11 @@ module.exports = {
 
   // Workout Plans
   getWorkoutPlan,
+  getWorkoutPlanById,
   getWorkoutPlansByPhone,
   getAllWorkoutPlans,
   saveWorkoutPlan,
+  updateWorkoutPlan,
   deleteWorkoutPlan,
 
   // Reminders

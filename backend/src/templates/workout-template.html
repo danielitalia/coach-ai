@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{gymName}} - Scheda Allenamento</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: {{primaryColor}};
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .client-info {
+            background: #f8fafc;
+            padding: 20px 30px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .client-name {
+            font-size: 22px;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 10px;
+        }
+
+        .client-details {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .detail-item {
+            background: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 13px;
+            color: #64748b;
+            border: 1px solid #e2e8f0;
+        }
+
+        .detail-item strong {
+            color: #334155;
+        }
+
+        .workout-section {
+            padding: 25px 30px;
+        }
+
+        .day-card {
+            background: #f8fafc;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+        }
+
+        .day-header {
+            background: {{primaryColor}};
+            color: white;
+            padding: 15px 20px;
+            font-weight: 600;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .day-header .icon {
+            font-size: 20px;
+        }
+
+        .exercises {
+            padding: 15px 20px;
+        }
+
+        .exercise {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .exercise:last-child {
+            border-bottom: none;
+        }
+
+        .exercise-name {
+            font-weight: 500;
+            color: #334155;
+        }
+
+        .exercise-details {
+            display: flex;
+            gap: 10px;
+        }
+
+        .exercise-badge {
+            background: {{primaryColor}}15;
+            color: {{primaryColor}};
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .tips-section {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 25px 30px;
+            margin: 0 20px 20px;
+            border-radius: 15px;
+        }
+
+        .tips-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .tips-list {
+            list-style: none;
+        }
+
+        .tips-list li {
+            padding: 8px 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            font-size: 14px;
+        }
+
+        .tips-list li::before {
+            content: "✓";
+            font-weight: bold;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            background: #f8fafc;
+            color: #64748b;
+            font-size: 12px;
+        }
+
+        .footer .date {
+            font-weight: 600;
+            color: #334155;
+        }
+
+        .print-btn {
+            display: block;
+            width: calc(100% - 40px);
+            margin: 0 20px 20px;
+            padding: 15px;
+            background: {{primaryColor}};
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .print-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+        }
+
+        .print-btn:active {
+            transform: translateY(0);
+        }
+
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            .card {
+                box-shadow: none;
+            }
+            .print-btn {
+                display: none;
+            }
+        }
+
+        .branding {
+            text-align: center;
+            padding: 15px;
+            color: white;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+
+        .branding a {
+            color: white;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <h1>{{gymName}}</h1>
+                <p>Scheda di Allenamento Personalizzata</p>
+            </div>
+
+            <div class="client-info">
+                <div class="client-name">{{clientName}}</div>
+                <div class="client-details">
+                    <span class="detail-item"><strong>Obiettivo:</strong> {{objective}}</span>
+                    <span class="detail-item"><strong>Livello:</strong> {{experience}}</span>
+                    <span class="detail-item"><strong>Giorni:</strong> {{daysPerWeek}}/settimana</span>
+                </div>
+            </div>
+
+            <div class="workout-section">
+                {{workoutDays}}
+            </div>
+
+            <div class="tips-section">
+                <div class="tips-title">💡 Suggerimenti per l'esecuzione</div>
+                <ul class="tips-list">
+                    <li>Fai sempre 5-10 min di riscaldamento prima</li>
+                    <li>Mantieni la postura corretta in ogni esercizio</li>
+                    <li>Respira: espira durante lo sforzo, inspira nel ritorno</li>
+                    <li>Il recupero tra le serie è importante, rispettalo!</li>
+                    <li>Bevi acqua durante l'allenamento</li>
+                    <li>Se senti dolore (non fatica), fermati subito</li>
+                </ul>
+            </div>
+
+            <button class="print-btn" onclick="window.print()">
+                📄 Salva / Stampa PDF
+            </button>
+
+            <div class="footer">
+                <p>Scheda generata il <span class="date">{{date}}</span></p>
+                <p>Valida fino a nuova scheda</p>
+            </div>
+        </div>
+
+        <div class="branding">
+            Powered by <a href="#">Coach AI</a> 🏋️
+        </div>
+    </div>
+</body>
+</html>
