@@ -873,6 +873,197 @@ async function addAuditLog(tenantId, userId, action, entityType, entityId, detai
   `, [tenantId, userId, action, entityType, entityId, details ? JSON.stringify(details) : null, ipAddress]);
 }
 
+// ========== AUTOMATION ==========
+
+async function getAllActiveTenants() {
+  const result = await pool.query(`
+    SELECT * FROM tenants
+    WHERE subscription_status = 'active' OR subscription_status IS NULL
+    ORDER BY created_at
+  `);
+  return result.rows;
+}
+
+async function getAutomationSequences(tenantId, triggerType = null) {
+  let query = 'SELECT * FROM automation_sequences WHERE tenant_id = $1';
+  const params = [tenantId];
+
+  if (triggerType) {
+    query += ' AND trigger_type = $2';
+    params.push(triggerType);
+  }
+
+  query += ' AND is_enabled = TRUE ORDER BY created_at';
+  const result = await pool.query(query, params);
+  return result.rows;
+}
+
+async function getAllAutomationSequences(tenantId) {
+  const result = await pool.query(
+    'SELECT * FROM automation_sequences WHERE tenant_id = $1 ORDER BY trigger_type, created_at',
+    [tenantId]
+  );
+  return result.rows;
+}
+
+async function getAutomationSequence(tenantId, sequenceId) {
+  const result = await pool.query(
+    'SELECT * FROM automation_sequences WHERE tenant_id = $1 AND id = $2',
+    [tenantId, sequenceId]
+  );
+  return result.rows[0] || null;
+}
+
+async function createAutomationSequence(tenantId, data) {
+  const result = await pool.query(`
+    INSERT INTO automation_sequences (tenant_id, name, trigger_type, trigger_config, message_template, is_enabled)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING *
+  `, [
+    tenantId,
+    data.name,
+    data.trigger_type,
+    JSON.stringify(data.trigger_config),
+    data.message_template,
+    data.is_enabled !== false
+  ]);
+  return result.rows[0];
+}
+
+async function updateAutomationSequence(tenantId, sequenceId, data) {
+  const fields = [];
+  const values = [];
+  let paramIndex = 1;
+
+  if (data.name !== undefined) {
+    fields.push(`name = $${paramIndex++}`);
+    values.push(data.name);
+  }
+  if (data.trigger_config !== undefined) {
+    fields.push(`trigger_config = $${paramIndex++}`);
+    values.push(JSON.stringify(data.trigger_config));
+  }
+  if (data.message_template !== undefined) {
+    fields.push(`message_template = $${paramIndex++}`);
+    values.push(data.message_template);
+  }
+  if (data.is_enabled !== undefined) {
+    fields.push(`is_enabled = $${paramIndex++}`);
+    values.push(data.is_enabled);
+  }
+
+  if (fields.length === 0) return getAutomationSequence(tenantId, sequenceId);
+
+  fields.push(`updated_at = NOW()`);
+  values.push(tenantId, sequenceId);
+
+  const result = await pool.query(`
+    UPDATE automation_sequences
+    SET ${fields.join(', ')}
+    WHERE tenant_id = $${paramIndex++} AND id = $${paramIndex}
+    RETURNING *
+  `, values);
+
+  return result.rows[0];
+}
+
+async function deleteAutomationSequence(tenantId, sequenceId) {
+  const result = await pool.query(
+    'DELETE FROM automation_sequences WHERE tenant_id = $1 AND id = $2 RETURNING *',
+    [tenantId, sequenceId]
+  );
+  return result.rows[0];
+}
+
+async function createAutomationJob(data) {
+  const result = await pool.query(`
+    INSERT INTO automation_jobs (tenant_id, sequence_id, phone, trigger_type, trigger_key, status, message_sent, error_message)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    RETURNING *
+  `, [
+    data.tenant_id,
+    data.sequence_id || null,
+    data.phone,
+    data.trigger_type,
+    data.trigger_key,
+    data.status || 'sent',
+    data.message_sent || null,
+    data.error_message || null
+  ]);
+  return result.rows[0];
+}
+
+async function hasRecentAutomationJob(tenantId, phone, triggerKey, daysBack = 30) {
+  const result = await pool.query(`
+    SELECT 1 FROM automation_jobs
+    WHERE tenant_id = $1 AND phone = $2 AND trigger_key = $3
+    AND status = 'sent'
+    AND executed_at > NOW() - INTERVAL '1 day' * $4
+    LIMIT 1
+  `, [tenantId, phone, triggerKey, daysBack]);
+  return result.rows.length > 0;
+}
+
+async function hasAutomationJobByKey(tenantId, triggerKey) {
+  const result = await pool.query(`
+    SELECT 1 FROM automation_jobs
+    WHERE tenant_id = $1 AND trigger_key = $2 AND status = 'sent'
+    LIMIT 1
+  `, [tenantId, triggerKey]);
+  return result.rows.length > 0;
+}
+
+async function getAutomationJobs(tenantId, limit = 100) {
+  const result = await pool.query(`
+    SELECT aj.*, as2.name as sequence_name
+    FROM automation_jobs aj
+    LEFT JOIN automation_sequences as2 ON aj.sequence_id = as2.id
+    WHERE aj.tenant_id = $1
+    ORDER BY aj.executed_at DESC
+    LIMIT $2
+  `, [tenantId, limit]);
+  return result.rows;
+}
+
+async function getAutomationStats(tenantId) {
+  const result = await pool.query(`
+    SELECT
+      COUNT(*) as total_jobs,
+      COUNT(*) FILTER (WHERE status = 'sent') as sent,
+      COUNT(*) FILTER (WHERE status = 'failed') as failed,
+      COUNT(*) FILTER (WHERE executed_at > NOW() - INTERVAL '24 hours') as last_24h,
+      COUNT(*) FILTER (WHERE executed_at > NOW() - INTERVAL '7 days') as last_7d
+    FROM automation_jobs
+    WHERE tenant_id = $1
+  `, [tenantId]);
+  return result.rows[0];
+}
+
+async function getCheckinsForFollowup(tenantId, delayMinutes) {
+  const result = await pool.query(`
+    SELECT * FROM checkins
+    WHERE tenant_id = $1
+    AND checked_in_at > NOW() - INTERVAL '1 minute' * ($2 + 10)
+    AND checked_in_at < NOW() - INTERVAL '1 minute' * ($2 - 5)
+    ORDER BY checked_in_at
+  `, [tenantId, delayMinutes]);
+  return result.rows;
+}
+
+async function getActiveClients(tenantId, daysActive = 7) {
+  const result = await pool.query(`
+    SELECT * FROM clients
+    WHERE tenant_id = $1
+    AND last_activity > NOW() - INTERVAL '1 day' * $2
+    ORDER BY last_activity DESC
+  `, [tenantId, daysActive]);
+  return result.rows;
+}
+
+async function getClientByPhone(tenantId, phone) {
+  return getClient(tenantId, phone);
+}
+
 // ========== EXPORTS ==========
 
 module.exports = {
@@ -972,5 +1163,22 @@ module.exports = {
   getReferralStatsGlobal,
 
   // Audit
-  addAuditLog
+  addAuditLog,
+
+  // Automation
+  getAllActiveTenants,
+  getAutomationSequences,
+  getAllAutomationSequences,
+  getAutomationSequence,
+  createAutomationSequence,
+  updateAutomationSequence,
+  deleteAutomationSequence,
+  createAutomationJob,
+  hasRecentAutomationJob,
+  hasAutomationJobByKey,
+  getAutomationJobs,
+  getAutomationStats,
+  getCheckinsForFollowup,
+  getActiveClients,
+  getClientByPhone
 };

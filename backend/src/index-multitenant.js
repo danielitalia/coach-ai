@@ -15,6 +15,9 @@ const authRoutes = require('./routes/auth');
 const tenantRoutes = require('./routes/tenants');
 const { requireTenant, identifyTenantFromWhatsApp } = require('./middleware/auth');
 
+// Marketing Automation
+const automation = require('./automation');
+
 // Directory per salvare i PDF delle schede
 const WORKOUTS_DIR = path.join(__dirname, '../workouts');
 if (!fs.existsSync(WORKOUTS_DIR)) {
@@ -1896,10 +1899,132 @@ app.post('/api/reminders/config', legacyTenant, async (req, res) => {
 
 app.post('/api/reminders/check', legacyTenant, async (req, res) => {
   try {
-    // Placeholder - reminder check logic
-    res.json({ sent: 0 });
+    // Trigger manual automation run
+    await automation.runNow();
+    res.json({ success: true, message: 'Automation triggered' });
   } catch (error) {
     console.error('Errore check reminders:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== AUTOMATION ENDPOINTS ==========
+
+// Get all automation sequences for tenant
+app.get('/api/automations', legacyTenant, async (req, res) => {
+  try {
+    const sequences = await db.getAllAutomationSequences(req.tenant.id);
+    res.json(sequences);
+  } catch (error) {
+    console.error('Errore get automations:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get single automation sequence
+app.get('/api/automations/:id', legacyTenant, async (req, res) => {
+  try {
+    const sequence = await db.getAutomationSequence(req.tenant.id, req.params.id);
+    if (!sequence) {
+      return res.status(404).json({ error: 'Automation not found' });
+    }
+    res.json(sequence);
+  } catch (error) {
+    console.error('Errore get automation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create new automation sequence
+app.post('/api/automations', legacyTenant, async (req, res) => {
+  try {
+    const sequence = await db.createAutomationSequence(req.tenant.id, req.body);
+    res.status(201).json(sequence);
+  } catch (error) {
+    console.error('Errore create automation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update automation sequence
+app.put('/api/automations/:id', legacyTenant, async (req, res) => {
+  try {
+    const sequence = await db.updateAutomationSequence(req.tenant.id, req.params.id, req.body);
+    if (!sequence) {
+      return res.status(404).json({ error: 'Automation not found' });
+    }
+    res.json(sequence);
+  } catch (error) {
+    console.error('Errore update automation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Toggle automation enabled/disabled
+app.post('/api/automations/:id/toggle', legacyTenant, async (req, res) => {
+  try {
+    const sequence = await db.getAutomationSequence(req.tenant.id, req.params.id);
+    if (!sequence) {
+      return res.status(404).json({ error: 'Automation not found' });
+    }
+    const updated = await db.updateAutomationSequence(req.tenant.id, req.params.id, {
+      is_enabled: !sequence.is_enabled
+    });
+    res.json(updated);
+  } catch (error) {
+    console.error('Errore toggle automation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete automation sequence
+app.delete('/api/automations/:id', legacyTenant, async (req, res) => {
+  try {
+    const deleted = await db.deleteAutomationSequence(req.tenant.id, req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: 'Automation not found' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Errore delete automation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get automation job history
+app.get('/api/automations/jobs/history', legacyTenant, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const jobs = await db.getAutomationJobs(req.tenant.id, limit);
+    res.json(jobs);
+  } catch (error) {
+    console.error('Errore get automation jobs:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get automation stats
+app.get('/api/automations/stats', legacyTenant, async (req, res) => {
+  try {
+    const stats = await db.getAutomationStats(req.tenant.id);
+    const status = automation.getStatus();
+    res.json({
+      ...stats,
+      schedulerRunning: status.initialized
+    });
+  } catch (error) {
+    console.error('Errore get automation stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Manually trigger automations
+app.post('/api/automations/run', legacyTenant, async (req, res) => {
+  try {
+    await automation.runNow();
+    res.json({ success: true, message: 'Automation cycle started' });
+  } catch (error) {
+    console.error('Errore run automation:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2304,9 +2429,29 @@ async function startServer() {
     await db.initDatabase();
     console.log('Database PostgreSQL connesso');
 
+    // Run migration for automation tables
+    try {
+      const migrationPath = path.join(__dirname, '../db/migrations/003-automation.sql');
+      if (fs.existsSync(migrationPath)) {
+        const migration = fs.readFileSync(migrationPath, 'utf8');
+        await db.pool.query(migration);
+        console.log('Automation tables migrated');
+      }
+    } catch (migrationError) {
+      // Ignore if tables already exist
+      if (!migrationError.message.includes('already exists')) {
+        console.log('Automation migration note:', migrationError.message);
+      }
+    }
+
+    // Initialize and start marketing automation
+    automation.init(db, sendWhatsAppMessage);
+    automation.start();
+
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log(`Coach AI Backend (Multi-Tenant) running on port ${PORT}`);
+      console.log('Marketing Automation: ACTIVE');
     });
   } catch (error) {
     console.error('Errore avvio server:', error);
