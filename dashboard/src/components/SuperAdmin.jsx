@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react'
 import {
   Building2, Users, MessageSquare, Activity, Plus, Edit, Trash2,
   Eye, Search, RefreshCw, ChevronDown, ChevronUp, X, Check,
-  TrendingUp, Smartphone, Calendar, LogIn, ArrowLeft
+  TrendingUp, Smartphone, Calendar, LogIn, ArrowLeft, CreditCard,
+  AlertTriangle, CheckCircle, Clock, FileText
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -352,6 +353,7 @@ function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImper
             <MessageSquare className="w-4 h-4" />
             <span>{tenant.messageCount || 0} msg</span>
           </div>
+          <SubscriptionBadge tenant={tenant} />
           <div className={`flex items-center gap-2 ${tenant.whatsappConnected ? 'text-green-600' : 'text-orange-500'}`}>
             <Smartphone className="w-4 h-4" />
             <span>{tenant.whatsappConnected ? 'Connesso' : 'Non connesso'}</span>
@@ -384,23 +386,114 @@ function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImper
       </div>
 
       {expanded && (
-        <div className="px-4 pb-4 pl-16 grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Coach Name</p>
-            <p className="font-medium">{tenant.coachName || 'Coach AI'}</p>
+        <div className="px-4 pb-4 pl-16 space-y-4">
+          {/* Subscription Info */}
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-100">
+            <div className="flex items-center gap-2 mb-3">
+              <CreditCard className="w-5 h-5 text-blue-600" />
+              <h4 className="font-semibold text-blue-900">Abbonamento</h4>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Piano</p>
+                <p className="font-semibold text-blue-900 capitalize">{tenant.subscriptionPlan || tenant.subscription_plan || 'trial'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Stato</p>
+                <p className={`font-semibold capitalize ${
+                  (tenant.subscriptionStatus || tenant.subscription_status) === 'active' ? 'text-green-600' :
+                  (tenant.subscriptionStatus || tenant.subscription_status) === 'suspended' ? 'text-orange-600' :
+                  'text-red-600'
+                }`}>
+                  {tenant.subscriptionStatus || tenant.subscription_status || 'active'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Scadenza</p>
+                <p className="font-semibold text-blue-900">
+                  {tenant.subscriptionExpiresAt || tenant.subscription_expires_at
+                    ? new Date(tenant.subscriptionExpiresAt || tenant.subscription_expires_at).toLocaleDateString('it-IT')
+                    : 'Nessuna'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Prezzo</p>
+                <p className="font-semibold text-blue-900">
+                  {tenant.subscriptionPrice || tenant.subscription_price
+                    ? `€${tenant.subscriptionPrice || tenant.subscription_price}/mese`
+                    : '-'}
+                </p>
+              </div>
+            </div>
+            {(tenant.subscriptionNotes || tenant.subscription_notes) && (
+              <div className="mt-3 pt-3 border-t border-blue-200">
+                <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Note</p>
+                <p className="text-sm text-blue-800">{tenant.subscriptionNotes || tenant.subscription_notes}</p>
+              </div>
+            )}
           </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">WhatsApp</p>
-            <p className="font-medium">{tenant.whatsappNumber || 'Non configurato'}</p>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Creato il</p>
-            <p className="font-medium">
-              {tenant.createdAt ? new Date(tenant.createdAt).toLocaleDateString('it-IT') : 'N/A'}
-            </p>
+
+          {/* General Info */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Coach Name</p>
+              <p className="font-medium">{tenant.coachName || tenant.coach_name || 'Coach AI'}</p>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">WhatsApp</p>
+              <p className="font-medium">{tenant.whatsappNumber || tenant.whatsapp_number || 'Non configurato'}</p>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Creato il</p>
+              <p className="font-medium">
+                {(tenant.createdAt || tenant.created_at) ? new Date(tenant.createdAt || tenant.created_at).toLocaleDateString('it-IT') : 'N/A'}
+              </p>
+            </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function SubscriptionBadge({ tenant }) {
+  const status = tenant.subscriptionStatus || tenant.subscription_status || 'active'
+  const plan = tenant.subscriptionPlan || tenant.subscription_plan || 'trial'
+  const expiresAt = tenant.subscriptionExpiresAt || tenant.subscription_expires_at
+
+  // Check if expiring soon (within 7 days)
+  const isExpiringSoon = expiresAt && new Date(expiresAt) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  const isExpired = expiresAt && new Date(expiresAt) < new Date()
+
+  if (status === 'suspended' || isExpired) {
+    return (
+      <div className="flex items-center gap-1 text-red-600">
+        <AlertTriangle className="w-4 h-4" />
+        <span className="text-xs font-medium">Sospeso</span>
+      </div>
+    )
+  }
+
+  if (isExpiringSoon) {
+    return (
+      <div className="flex items-center gap-1 text-orange-600">
+        <Clock className="w-4 h-4" />
+        <span className="text-xs font-medium">In scadenza</span>
+      </div>
+    )
+  }
+
+  const planColors = {
+    trial: 'text-gray-600',
+    basic: 'text-blue-600',
+    pro: 'text-purple-600',
+    enterprise: 'text-amber-600'
+  }
+
+  return (
+    <div className={`flex items-center gap-1 ${planColors[plan] || 'text-gray-600'}`}>
+      <CheckCircle className="w-4 h-4" />
+      <span className="text-xs font-medium capitalize">{plan}</span>
     </div>
   )
 }
@@ -411,8 +504,14 @@ function TenantModal({ tenant, onClose, onSave }) {
     slug: tenant?.slug || '',
     coachName: tenant?.coachName || tenant?.coach_name || 'Coach AI',
     useEmoji: tenant?.useEmoji ?? tenant?.use_emoji ?? true,
-    whatsappInstanceName: tenant?.whatsappInstanceName || tenant?.whatsapp_instance_name || ''
+    whatsappInstanceName: tenant?.whatsappInstanceName || tenant?.whatsapp_instance_name || '',
+    subscriptionPlan: tenant?.subscriptionPlan || tenant?.subscription_plan || 'trial',
+    subscriptionStatus: tenant?.subscriptionStatus || tenant?.subscription_status || 'active',
+    subscriptionExpiresAt: tenant?.subscriptionExpiresAt || tenant?.subscription_expires_at || '',
+    subscriptionPrice: tenant?.subscriptionPrice || tenant?.subscription_price || '',
+    subscriptionNotes: tenant?.subscriptionNotes || tenant?.subscription_notes || ''
   })
+  const [activeTab, setActiveTab] = useState('general')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -465,76 +564,256 @@ function TenantModal({ tenant, onClose, onSave }) {
           </button>
         </div>
 
+        {/* Tabs */}
+        <div className="border-b border-gray-200">
+          <div className="flex">
+            <button
+              type="button"
+              onClick={() => setActiveTab('general')}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'general'
+                  ? 'border-red-500 text-red-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Building2 className="w-4 h-4 inline mr-2" />
+              Generale
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('subscription')}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'subscription'
+                  ? 'border-red-500 text-red-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <CreditCard className="w-4 h-4 inline mr-2" />
+              Abbonamento
+            </button>
+          </div>
+        </div>
+
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Nome Palestra *
-            </label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(e) => handleNameChange(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-              placeholder="Es. Fitness Club Roma"
-              required
-            />
-          </div>
+          {/* General Tab */}
+          {activeTab === 'general' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Nome Palestra *
+                </label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  placeholder="Es. Fitness Club Roma"
+                  required
+                />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Slug (URL) *
-            </label>
-            <input
-              type="text"
-              value={formData.slug}
-              onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-              placeholder="fitness-club-roma"
-              required
-              disabled={!!tenant}
-            />
-            <p className="text-xs text-gray-500 mt-1">Identificatore unico, non modificabile dopo la creazione</p>
-          </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Slug (URL) *
+                </label>
+                <input
+                  type="text"
+                  value={formData.slug}
+                  onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  placeholder="fitness-club-roma"
+                  required
+                  disabled={!!tenant}
+                />
+                <p className="text-xs text-gray-500 mt-1">Identificatore unico, non modificabile dopo la creazione</p>
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Nome Coach AI
-            </label>
-            <input
-              type="text"
-              value={formData.coachName}
-              onChange={(e) => setFormData(prev => ({ ...prev, coachName: e.target.value }))}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-              placeholder="Coach AI"
-            />
-          </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Nome Coach AI
+                </label>
+                <input
+                  type="text"
+                  value={formData.coachName}
+                  onChange={(e) => setFormData(prev => ({ ...prev, coachName: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  placeholder="Coach AI"
+                />
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Nome Istanza WhatsApp
-            </label>
-            <input
-              type="text"
-              value={formData.whatsappInstanceName}
-              onChange={(e) => setFormData(prev => ({ ...prev, whatsappInstanceName: e.target.value }))}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-              placeholder="coach-ai"
-            />
-            <p className="text-xs text-gray-500 mt-1">Nome dell'istanza in Evolution API</p>
-          </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Nome Istanza WhatsApp
+                </label>
+                <input
+                  type="text"
+                  value={formData.whatsappInstanceName}
+                  onChange={(e) => setFormData(prev => ({ ...prev, whatsappInstanceName: e.target.value }))}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  placeholder="coach-ai"
+                />
+                <p className="text-xs text-gray-500 mt-1">Nome dell'istanza in Evolution API</p>
+              </div>
 
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="useEmoji"
-              checked={formData.useEmoji}
-              onChange={(e) => setFormData(prev => ({ ...prev, useEmoji: e.target.checked }))}
-              className="w-5 h-5 text-red-500 rounded focus:ring-red-500"
-            />
-            <label htmlFor="useEmoji" className="text-sm text-gray-700">
-              Usa emoji nei messaggi
-            </label>
-          </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="useEmoji"
+                  checked={formData.useEmoji}
+                  onChange={(e) => setFormData(prev => ({ ...prev, useEmoji: e.target.checked }))}
+                  className="w-5 h-5 text-red-500 rounded focus:ring-red-500"
+                />
+                <label htmlFor="useEmoji" className="text-sm text-gray-700">
+                  Usa emoji nei messaggi
+                </label>
+              </div>
+            </>
+          )}
+
+          {/* Subscription Tab */}
+          {activeTab === 'subscription' && (
+            <>
+              <div className="bg-blue-50 rounded-lg p-4 mb-4">
+                <p className="text-sm text-blue-700">
+                  <FileText className="w-4 h-4 inline mr-2" />
+                  Gestisci l'abbonamento di questa palestra. I pagamenti sono gestiti esternamente (bonifico, contratto).
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Piano
+                  </label>
+                  <select
+                    value={formData.subscriptionPlan}
+                    onChange={(e) => setFormData(prev => ({ ...prev, subscriptionPlan: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  >
+                    <option value="trial">Trial (Prova)</option>
+                    <option value="basic">Basic</option>
+                    <option value="pro">Pro</option>
+                    <option value="enterprise">Enterprise</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Stato
+                  </label>
+                  <select
+                    value={formData.subscriptionStatus}
+                    onChange={(e) => setFormData(prev => ({ ...prev, subscriptionStatus: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  >
+                    <option value="active">Attivo</option>
+                    <option value="suspended">Sospeso</option>
+                    <option value="cancelled">Cancellato</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Data Scadenza
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.subscriptionExpiresAt ? formData.subscriptionExpiresAt.split('T')[0] : ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, subscriptionExpiresAt: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Lascia vuoto per abbonamento senza scadenza</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Prezzo (€/mese)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.subscriptionPrice}
+                    onChange={(e) => setFormData(prev => ({ ...prev, subscriptionPrice: e.target.value }))}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                    placeholder="99.00"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Note Abbonamento
+                </label>
+                <textarea
+                  value={formData.subscriptionNotes}
+                  onChange={(e) => setFormData(prev => ({ ...prev, subscriptionNotes: e.target.value }))}
+                  rows={3}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  placeholder="Es. Contratto firmato il 15/02/2024, pagamento trimestrale..."
+                />
+                <p className="text-xs text-gray-500 mt-1">Informazioni aggiuntive sul contratto o pagamento</p>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="border-t border-gray-200 pt-4">
+                <p className="text-sm font-medium text-gray-700 mb-3">Azioni rapide</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextMonth = new Date()
+                      nextMonth.setMonth(nextMonth.getMonth() + 1)
+                      setFormData(prev => ({
+                        ...prev,
+                        subscriptionExpiresAt: nextMonth.toISOString().split('T')[0]
+                      }))
+                    }}
+                    className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  >
+                    +1 Mese
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextYear = new Date()
+                      nextYear.setFullYear(nextYear.getFullYear() + 1)
+                      setFormData(prev => ({
+                        ...prev,
+                        subscriptionExpiresAt: nextYear.toISOString().split('T')[0]
+                      }))
+                    }}
+                    className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  >
+                    +1 Anno
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({
+                      ...prev,
+                      subscriptionStatus: 'active',
+                      subscriptionPlan: 'pro'
+                    }))}
+                    className="px-3 py-1.5 text-xs bg-green-100 text-green-700 hover:bg-green-200 rounded-lg transition-colors"
+                  >
+                    Attiva Pro
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({
+                      ...prev,
+                      subscriptionStatus: 'suspended'
+                    }))}
+                    className="px-3 py-1.5 text-xs bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors"
+                  >
+                    Sospendi
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
 
           {error && (
             <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">

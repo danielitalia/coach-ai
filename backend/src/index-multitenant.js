@@ -2271,7 +2271,13 @@ app.get('/api/superadmin/tenants', async (req, res) => {
       whatsappConnected: t.whatsapp_connected,
       clientCount: parseInt(t.client_count) || 0,
       messageCount: parseInt(t.message_count) || 0,
-      createdAt: t.created_at
+      createdAt: t.created_at,
+      // Subscription fields
+      subscriptionPlan: t.subscription_plan || 'trial',
+      subscriptionStatus: t.subscription_status || 'active',
+      subscriptionExpiresAt: t.subscription_ends_at,
+      subscriptionPrice: t.subscription_price,
+      subscriptionNotes: t.subscription_notes
     }));
 
     const stats = statsResult.rows[0];
@@ -2323,7 +2329,10 @@ app.post('/api/superadmin/tenants', async (req, res) => {
 app.put('/api/superadmin/tenants/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, coachName, useEmoji, whatsappInstanceName } = req.body;
+    const {
+      name, coachName, useEmoji, whatsappInstanceName,
+      subscriptionPlan, subscriptionStatus, subscriptionExpiresAt, subscriptionPrice, subscriptionNotes
+    } = req.body;
 
     const result = await db.pool.query(`
       UPDATE tenants
@@ -2331,10 +2340,22 @@ app.put('/api/superadmin/tenants/:id', async (req, res) => {
           coach_name = COALESCE($2, coach_name),
           use_emoji = COALESCE($3, use_emoji),
           whatsapp_instance_name = COALESCE($4, whatsapp_instance_name),
+          subscription_plan = COALESCE($5, subscription_plan),
+          subscription_status = COALESCE($6, subscription_status),
+          subscription_ends_at = $7,
+          subscription_price = $8,
+          subscription_notes = $9,
           updated_at = NOW()
-      WHERE id = $5
+      WHERE id = $10
       RETURNING *
-    `, [name, coachName, useEmoji, whatsappInstanceName, id]);
+    `, [
+      name, coachName, useEmoji, whatsappInstanceName,
+      subscriptionPlan, subscriptionStatus,
+      subscriptionExpiresAt || null,
+      subscriptionPrice || null,
+      subscriptionNotes || null,
+      id
+    ]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Tenant non trovato' });
