@@ -4,7 +4,7 @@ import {
   Users, MessageSquare, BarChart3, Settings as SettingsIcon,
   Dumbbell, Menu, X, Phone, Clock, TrendingUp,
   UserPlus, Activity, Calendar, Bell, Smartphone, QrCode, Gift,
-  LogOut, User, ChevronDown
+  LogOut, User, ChevronDown, Zap
 } from 'lucide-react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import LoginPage from './components/LoginPage'
@@ -18,6 +18,7 @@ import SettingsPage from './components/Settings'
 import WhatsAppConnect from './components/WhatsAppConnect'
 import CheckIn from './components/CheckIn'
 import Referral from './components/Referral'
+import Automations from './components/Automations'
 import SuperAdmin from './components/SuperAdmin'
 
 // Protected Route component
@@ -54,6 +55,7 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
     { to: '/workouts', icon: Dumbbell, label: 'Schede' },
     { to: '/checkin', icon: QrCode, label: 'Check-in' },
     { to: '/referral', icon: Gift, label: 'Referral' },
+    { to: '/automations', icon: Zap, label: 'Automazioni' },
     { to: '/reminders', icon: Bell, label: 'Promemoria' },
     { to: '/whatsapp', icon: Smartphone, label: 'WhatsApp' },
     { to: '/settings', icon: SettingsIcon, label: 'Impostazioni' },
@@ -384,6 +386,7 @@ function MainLayout() {
             <Route path="/workouts" element={<WorkoutPlans />} />
             <Route path="/checkin" element={<CheckIn />} />
             <Route path="/referral" element={<Referral />} />
+            <Route path="/automations" element={<Automations />} />
             <Route path="/reminders" element={<Reminders />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/whatsapp" element={<WhatsAppConnect />} />
