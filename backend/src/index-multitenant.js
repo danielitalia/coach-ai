@@ -1921,6 +1921,44 @@ app.get('/api/automations', legacyTenant, async (req, res) => {
   }
 });
 
+// Get automation stats (MUST be before /:id route)
+app.get('/api/automations/stats', legacyTenant, async (req, res) => {
+  try {
+    const stats = await db.getAutomationStats(req.tenant.id);
+    const status = automation.getStatus();
+    res.json({
+      ...stats,
+      schedulerRunning: status.initialized
+    });
+  } catch (error) {
+    console.error('Errore get automation stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get automation job history (MUST be before /:id route)
+app.get('/api/automations/jobs', legacyTenant, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const jobs = await db.getAutomationJobs(req.tenant.id, limit);
+    res.json(jobs);
+  } catch (error) {
+    console.error('Errore get automation jobs:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Manually trigger automations (MUST be before /:id route)
+app.post('/api/automations/run', legacyTenant, async (req, res) => {
+  try {
+    await automation.runNow();
+    res.json({ success: true, message: 'Automation cycle started' });
+  } catch (error) {
+    console.error('Errore run automation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get single automation sequence
 app.get('/api/automations/:id', legacyTenant, async (req, res) => {
   try {
@@ -1987,44 +2025,6 @@ app.delete('/api/automations/:id', legacyTenant, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Errore delete automation:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get automation job history
-app.get('/api/automations/jobs/history', legacyTenant, async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 100;
-    const jobs = await db.getAutomationJobs(req.tenant.id, limit);
-    res.json(jobs);
-  } catch (error) {
-    console.error('Errore get automation jobs:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get automation stats
-app.get('/api/automations/stats', legacyTenant, async (req, res) => {
-  try {
-    const stats = await db.getAutomationStats(req.tenant.id);
-    const status = automation.getStatus();
-    res.json({
-      ...stats,
-      schedulerRunning: status.initialized
-    });
-  } catch (error) {
-    console.error('Errore get automation stats:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Manually trigger automations
-app.post('/api/automations/run', legacyTenant, async (req, res) => {
-  try {
-    await automation.runNow();
-    res.json({ success: true, message: 'Automation cycle started' });
-  } catch (error) {
-    console.error('Errore run automation:', error);
     res.status(500).json({ error: error.message });
   }
 });
