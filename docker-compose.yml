@@ -83,9 +83,10 @@ services:
       - EVOLUTION_API_URL=http://evolution-api:8080
       - EVOLUTION_API_KEY=coach-ai-secret-key-2026
       - DATABASE_URL=postgresql://postgres:coachaipass@postgres:5432/coachai
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://host.docker.internal:11434/v1}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-ollama}
-      - OPENAI_MODEL=${OPENAI_MODEL:-llama3.2:3b}
+      - AI_PROVIDER=anthropic
+      - AI_MODEL=claude-sonnet-4-20250514
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - APP_BASE_URL=https://f858-93-150-243-154.ngrok-free.app
     volumes:
       - ./backend:/app
       - /app/node_modules
@@ -95,16 +96,13 @@ services:
       - evolution-api
       - postgres
 
-  # Dashboard React
+  # Dashboard React (production con nginx)
   dashboard:
     build: ./dashboard
     container_name: coach-ai-dashboard
     restart: always
     ports:
-      - "5173:5173"
-    volumes:
-      - ./dashboard:/app
-      - /app/node_modules
+      - "8081:80"
     networks:
       - coach-ai-network
     depends_on:

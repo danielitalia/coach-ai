@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Dumbbell, Mail, Lock, Eye, EyeOff, AlertCircle, Loader2 } from 'lucide-react'
 
@@ -132,15 +133,15 @@ function LoginPage() {
             <div className="flex-1 border-t border-gray-200"></div>
           </div>
 
-          {/* Demo access info */}
+          {/* Register link */}
           <div className="text-center">
-            <p className="text-sm text-gray-500 mb-2">Vuoi provare Coach AI?</p>
-            <a
-              href="#"
+            <p className="text-sm text-gray-500 mb-2">Non hai ancora un account?</p>
+            <Link
+              to="/register"
               className="text-primary-600 hover:text-primary-700 font-medium text-sm"
             >
-              Richiedi una demo gratuita
-            </a>
+              Registra la tua palestra
+            </Link>
           </div>
         </div>
 

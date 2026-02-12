@@ -78,7 +78,7 @@ ALTER TABLE clients
     ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE;
 
 -- Rimuovi vincolo UNIQUE su phone (ora è unique per tenant)
-ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_phone_key;
+ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_phone_key CASCADE;
 ALTER TABLE clients ADD CONSTRAINT clients_tenant_phone_unique UNIQUE(tenant_id, phone);
 
 -- Aggiungi tenant_id a messages

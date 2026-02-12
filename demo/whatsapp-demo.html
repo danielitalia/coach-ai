@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coach AI - WhatsApp Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .phone-container {
+            width: 375px;
+            height: 750px;
+            background: #000;
+            border-radius: 45px;
+            padding: 12px;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.4);
+        }
+
+        .phone-screen {
+            width: 100%;
+            height: 100%;
+            background: #e5ddd5;
+            border-radius: 35px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* WhatsApp Header */
+        .wa-header {
+            background: #075e54;
+            padding: 10px 15px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .wa-header .back-arrow {
+            color: white;
+            font-size: 20px;
+        }
+
+        .wa-header .avatar {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #00b09b, #96c93d);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .wa-header .contact-info {
+            flex: 1;
+        }
+
+        .wa-header .contact-name {
+            color: white;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .wa-header .contact-status {
+            color: rgba(255,255,255,0.8);
+            font-size: 12px;
+        }
+
+        .wa-header .icons {
+            display: flex;
+            gap: 18px;
+            color: white;
+            font-size: 18px;
+        }
+
+        /* Chat Area */
+        .chat-area {
+            flex: 1;
+            background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAYAAAAeP4ixAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAALEwAACxMBAJqcGAAAAd9JREFUaIHtmLFuwzAMRJ+L/v9XtksHDx06dOrQoUOHAtU5sC1ZPEqOk8IA3SAJJd3xSNly7u7u7v4VvzzOAhxC5IAQOSDEOaHf97sOIkK893p/CxHjh0VsF+TQCv0cxNgh0TbIoRX6OYixQ6JtkEMr9HMQY4dE2yCHVujnIMYOibZBDq3Qz0GMHRJtgxxaoZ+DGDsk2gY5tEI/BzF2SLQNcmiFfg5i7JBoG+TQCv0cxNgh0TbIoRX6OYixQ6JtkEMr9HMQY4dE2yCHVujnIMYOibZBDq3Qz0E=') repeat;
+            padding: 10px 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 8px 12px;
+            border-radius: 8px;
+            position: relative;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: messageIn 0.3s ease forwards;
+        }
+
+        @keyframes messageIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.sent {
+            background: #dcf8c6;
+            align-self: flex-end;
+            border-bottom-right-radius: 0;
+        }
+
+        .message.received {
+            background: white;
+            align-self: flex-start;
+            border-bottom-left-radius: 0;
+        }
+
+        .message .text {
+            font-size: 14px;
+            line-height: 1.4;
+            color: #303030;
+        }
+
+        .message .time {
+            font-size: 11px;
+            color: #999;
+            text-align: right;
+            margin-top: 4px;
+        }
+
+        .message.sent .time {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .message.sent .time::after {
+            content: "✓✓";
+            color: #53bdeb;
+            font-size: 14px;
+        }
+
+        /* Typing Indicator */
+        .typing-indicator {
+            display: none;
+            background: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border-bottom-left-radius: 0;
+            align-self: flex-start;
+            max-width: 80px;
+        }
+
+        .typing-indicator.show {
+            display: block;
+        }
+
+        .typing-indicator .dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-indicator .dot {
+            width: 8px;
+            height: 8px;
+            background: #999;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator .dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator .dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-5px); }
+        }
+
+        /* Input Area */
+        .input-area {
+            background: #f0f0f0;
+            padding: 8px 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .input-area .emoji-btn {
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .input-area input {
+            flex: 1;
+            border: none;
+            background: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-size: 15px;
+            outline: none;
+        }
+
+        .input-area .send-btn {
+            width: 45px;
+            height: 45px;
+            background: #075e54;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            border: none;
+            transition: transform 0.2s;
+        }
+
+        .input-area .send-btn:hover {
+            transform: scale(1.1);
+        }
+
+        /* Workout Card */
+        .workout-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 12px;
+            margin-top: 8px;
+        }
+
+        .workout-card h4 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .workout-card .exercise {
+            background: rgba(255,255,255,0.2);
+            padding: 8px 12px;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+
+        .workout-card .exercise:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Controls */
+        .controls {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .controls button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-start {
+            background: #25d366;
+            color: white;
+        }
+
+        .btn-reset {
+            background: white;
+            color: #333;
+        }
+
+        .controls button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+        }
+
+        /* Branding */
+        .branding {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: white;
+        }
+
+        .branding h1 {
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+
+        .branding p {
+            opacity: 0.8;
+            font-size: 14px;
+        }
+
+        /* Info Box */
+        .info-box {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.95);
+            padding: 20px;
+            border-radius: 15px;
+            max-width: 280px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+
+        .info-box h3 {
+            color: #075e54;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .info-box ul {
+            list-style: none;
+            font-size: 13px;
+            color: #555;
+        }
+
+        .info-box li {
+            padding: 6px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .info-box li::before {
+            content: "✓";
+            color: #25d366;
+            font-weight: bold;
+        }
+
+        @media (max-width: 800px) {
+            .branding, .info-box {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Branding -->
+    <div class="branding">
+        <h1>Coach AI</h1>
+        <p>Personal Trainer Virtuale 24/7</p>
+    </div>
+
+    <!-- Info Box -->
+    <div class="info-box">
+        <h3>Cosa fa Coach AI?</h3>
+        <ul>
+            <li>Risponde in tempo reale 24/7</li>
+            <li>Crea schede personalizzate</li>
+            <li>Motiva i clienti ogni giorno</li>
+            <li>Aumenta retention del 30%</li>
+            <li>Funziona su WhatsApp</li>
+        </ul>
+    </div>
+
+    <!-- Phone -->
+    <div class="phone-container">
+        <div class="phone-screen">
+            <!-- Header -->
+            <div class="wa-header">
+                <span class="back-arrow">←</span>
+                <div class="avatar">🏋️</div>
+                <div class="contact-info">
+                    <div class="contact-name">Coach AI - Palestra Amati</div>
+                    <div class="contact-status">online</div>
+                </div>
+                <div class="icons">
+                    <span>📹</span>
+                    <span>📞</span>
+                </div>
+            </div>
+
+            <!-- Chat -->
+            <div class="chat-area" id="chatArea">
+                <!-- Messages will appear here -->
+                <div class="typing-indicator" id="typingIndicator">
+                    <div class="dots">
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input -->
+            <div class="input-area">
+                <span class="emoji-btn">😊</span>
+                <input type="text" placeholder="Scrivi un messaggio..." id="messageInput">
+                <button class="send-btn" onclick="sendCustomMessage()">➤</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <button class="btn-start" onclick="startDemo()">▶ Avvia Demo</button>
+        <button class="btn-reset" onclick="resetDemo()">↺ Reset</button>
+    </div>
+
+    <script>
+        const chatArea = document.getElementById('chatArea');
+        const typingIndicator = document.getElementById('typingIndicator');
+        const messageInput = document.getElementById('messageInput');
+
+        // Demo conversation
+        const conversation = [
+            { type: 'sent', text: 'Ciao! Vorrei iniziare ad allenarmi 💪', delay: 500 },
+            { type: 'received', text: 'Ciao! 👋 Benvenuto nella nostra palestra! Sono Coach AI, il tuo personal trainer virtuale.\n\nSono qui per aiutarti a raggiungere i tuoi obiettivi. Qual è il tuo obiettivo principale?', delay: 2000 },
+            { type: 'sent', text: 'Vorrei dimagrire e tonificarmi', delay: 2500 },
+            { type: 'received', text: 'Ottimo obiettivo! 🎯\n\nPer creare il programma perfetto per te, ho bisogno di sapere:\n\n1️⃣ Quanti giorni a settimana puoi allenarti?\n2️⃣ Hai esperienza in palestra?', delay: 2000 },
+            { type: 'sent', text: '3 giorni, sono principiante', delay: 2000 },
+            { type: 'received', text: 'Perfetto! Ho creato la tua scheda personalizzata 🏋️', delay: 1500, hasWorkout: true },
+            { type: 'sent', text: 'Wow! Grazie mille! 😍', delay: 2000 },
+            { type: 'received', text: 'Di nulla! 💪\n\nScrivimi quando vuoi per:\n• Dubbi sugli esercizi\n• Consigli alimentari\n• Motivazione\n\nSono qui 24/7! In bocca al lupo per il tuo primo allenamento! 🍀', delay: 2000 }
+        ];
+
+        let currentIndex = 0;
+        let isRunning = false;
+
+        function getTime() {
+            const now = new Date();
+            return now.getHours().toString().padStart(2, '0') + ':' +
+                   now.getMinutes().toString().padStart(2, '0');
+        }
+
+        function addMessage(type, text, hasWorkout = false) {
+            const message = document.createElement('div');
+            message.className = `message ${type}`;
+
+            let content = `<div class="text">${text.replace(/\n/g, '<br>')}</div>`;
+
+            if (hasWorkout) {
+                content += `
+                    <div class="workout-card">
+                        <h4>🏋️ SCHEDA DIMAGRIMENTO - Settimana 1</h4>
+                        <div class="exercise">💪 Squat 3x12</div>
+                        <div class="exercise">💪 Chest Press 3x12</div>
+                        <div class="exercise">💪 Lat Machine 3x12</div>
+                        <div class="exercise">💪 Plank 3x30sec</div>
+                        <div class="exercise">🏃 Cardio 15min</div>
+                    </div>
+                `;
+            }
+
+            content += `<div class="time">${getTime()}</div>`;
+            message.innerHTML = content;
+
+            // Insert before typing indicator
+            chatArea.insertBefore(message, typingIndicator);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function showTyping() {
+            typingIndicator.classList.add('show');
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function hideTyping() {
+            typingIndicator.classList.remove('show');
+        }
+
+        async function runConversation() {
+            if (currentIndex >= conversation.length) {
+                isRunning = false;
+                return;
+            }
+
+            const msg = conversation[currentIndex];
+
+            if (msg.type === 'received') {
+                showTyping();
+                await sleep(1500);
+                hideTyping();
+            }
+
+            await sleep(msg.delay);
+            addMessage(msg.type, msg.text, msg.hasWorkout);
+
+            currentIndex++;
+            runConversation();
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        function startDemo() {
+            if (isRunning) return;
+            isRunning = true;
+            runConversation();
+        }
+
+        function resetDemo() {
+            isRunning = false;
+            currentIndex = 0;
+            hideTyping();
+
+            // Remove all messages
+            const messages = chatArea.querySelectorAll('.message');
+            messages.forEach(m => m.remove());
+        }
+
+        function sendCustomMessage() {
+            const text = messageInput.value.trim();
+            if (!text) return;
+
+            addMessage('sent', text);
+            messageInput.value = '';
+
+            // Auto-response
+            setTimeout(() => {
+                showTyping();
+                setTimeout(() => {
+                    hideTyping();
+                    addMessage('received', 'Grazie per il messaggio! 💪 Come posso aiutarti oggi?');
+                }, 1500);
+            }, 500);
+        }
+
+        // Enter key to send
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendCustomMessage();
+        });
+    </script>
+</body>
+</html>

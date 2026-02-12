@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import LoginPage from './components/LoginPage'
+import RegisterPage from './components/RegisterPage'
 import ClientList from './components/ClientList'
 import Conversations from './components/Conversations'
 import Analytics from './components/Analytics'
@@ -17,6 +18,7 @@ import SettingsPage from './components/Settings'
 import WhatsAppConnect from './components/WhatsAppConnect'
 import CheckIn from './components/CheckIn'
 import Referral from './components/Referral'
+import SuperAdmin from './components/SuperAdmin'
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -398,6 +400,8 @@ function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPageWrapper />} />
+          <Route path="/register" element={<RegisterPageWrapper />} />
+          <Route path="/superadmin" element={<SuperAdmin />} />
           <Route path="/*" element={
             <ProtectedRoute>
               <MainLayout />
@@ -426,6 +430,25 @@ function LoginPageWrapper() {
   }
 
   return <LoginPage />
+}
+
+// Wrapper per la pagina di registrazione
+function RegisterPageWrapper() {
+  const { isAuthenticated, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />
+  }
+
+  return <RegisterPage />
 }
 
 export default App

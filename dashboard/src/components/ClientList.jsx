@@ -1,10 +1,20 @@
 import React, { useState, useEffect } from 'react'
-import { Search, Phone, MessageSquare, MoreVertical, UserPlus, Filter } from 'lucide-react'
+import { Search, Phone, MessageSquare, MoreVertical, UserPlus, Filter, X } from 'lucide-react'
 
 function ClientList() {
   const [clients, setClients] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [filter, setFilter] = useState('all')
+  const [showModal, setShowModal] = useState(false)
+  const [newClient, setNewClient] = useState({
+    phone: '',
+    name: '',
+    objective: '',
+    experience: '',
+    daysPerWeek: 3
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     fetchClients()
@@ -18,65 +28,49 @@ function ClientList() {
         setClients(data)
       }
     } catch (err) {
-      // Demo data
-      setClients([
-        {
-          phone: '393920434058',
-          name: 'Daniel Ramos',
-          status: 'active',
-          objective: 'Massa muscolare',
-          experience: 'Intermedio',
-          daysPerWeek: 4,
-          lastContact: new Date(),
-          messagesCount: 12
-        },
-        {
-          phone: '393331234567',
-          name: 'Mario Rossi',
-          status: 'active',
-          objective: 'Dimagrire',
-          experience: 'Principiante',
-          daysPerWeek: 3,
-          lastContact: new Date(Date.now() - 86400000),
-          messagesCount: 8
-        },
-        {
-          phone: '393389876543',
-          name: 'Laura Bianchi',
-          status: 'inactive',
-          objective: 'Tonificare',
-          experience: 'Esperto',
-          daysPerWeek: 5,
-          lastContact: new Date(Date.now() - 604800000),
-          messagesCount: 24
-        },
-        {
-          phone: '393401122334',
-          name: 'Giuseppe Verdi',
-          status: 'new',
-          objective: null,
-          experience: null,
-          daysPerWeek: null,
-          lastContact: new Date(),
-          messagesCount: 2
-        },
-        {
-          phone: '393285544332',
-          name: 'Anna Neri',
-          status: 'active',
-          objective: 'Salute generale',
-          experience: 'Principiante',
-          daysPerWeek: 2,
-          lastContact: new Date(Date.now() - 172800000),
-          messagesCount: 15
-        }
-      ])
+      console.error('Errore caricamento clienti:', err)
+    }
+  }
+
+  const handleCreateClient = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+
+    try {
+      // Formatta il numero di telefono (rimuovi spazi e +)
+      let phone = newClient.phone.replace(/\s+/g, '').replace(/^\+/, '')
+      if (!phone.startsWith('39')) {
+        phone = '39' + phone
+      }
+
+      const res = await fetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...newClient,
+          phone
+        })
+      })
+
+      if (res.ok) {
+        setShowModal(false)
+        setNewClient({ phone: '', name: '', objective: '', experience: '', daysPerWeek: 3 })
+        fetchClients()
+      } else {
+        const data = await res.json()
+        setError(data.error || 'Errore creazione cliente')
+      }
+    } catch (err) {
+      setError('Errore di connessione')
+    } finally {
+      setLoading(false)
     }
   }
 
   const filteredClients = clients.filter(client => {
-    const matchesSearch = client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          client.phone.includes(searchTerm)
+    const matchesSearch = client.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          client.phone?.includes(searchTerm)
     const matchesFilter = filter === 'all' || client.status === filter
     return matchesSearch && matchesFilter
   })
@@ -100,7 +94,10 @@ function ClientList() {
           <h2 className="text-2xl font-bold text-gray-900">Clienti</h2>
           <p className="text-gray-500">{clients.length} clienti totali</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors">
+        <button
+          onClick={() => setShowModal(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+        >
           <UserPlus className="w-5 h-5" />
           <span>Nuovo Cliente</span>
         </button>
@@ -144,14 +141,14 @@ function ClientList() {
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
                   <span className="text-primary-700 font-bold text-lg">
-                    {client.name.charAt(0)}
+                    {client.name?.charAt(0) || '?'}
                   </span>
                 </div>
                 <div>
                   <div className="flex items-center gap-3">
-                    <h3 className="font-semibold text-gray-900">{client.name}</h3>
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[client.status]}`}>
-                      {statusLabels[client.status]}
+                    <h3 className="font-semibold text-gray-900">{client.name || 'Sconosciuto'}</h3>
+                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[client.status] || statusColors.new}`}>
+                      {statusLabels[client.status] || 'Nuovo'}
                     </span>
                   </div>
                   <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
@@ -161,7 +158,7 @@ function ClientList() {
                     </span>
                     <span className="flex items-center gap-1">
                       <MessageSquare className="w-4 h-4" />
-                      {client.messagesCount} messaggi
+                      {client.messagesCount || 0} messaggi
                     </span>
                   </div>
                 </div>
@@ -208,6 +205,124 @@ function ClientList() {
       {filteredClients.length === 0 && (
         <div className="text-center py-12">
           <p className="text-gray-500">Nessun cliente trovato</p>
+        </div>
+      )}
+
+      {/* Modal Nuovo Cliente */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-900">Nuovo Cliente</h3>
+              <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {error && (
+              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateClient} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Numero WhatsApp *
+                </label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="393920434058"
+                  value={newClient.phone}
+                  onChange={(e) => setNewClient({...newClient, phone: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">Formato: 39XXXXXXXXXX (con prefisso Italia)</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nome *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Mario Rossi"
+                  value={newClient.name}
+                  onChange={(e) => setNewClient({...newClient, name: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Obiettivo
+                </label>
+                <select
+                  value={newClient.objective}
+                  onChange={(e) => setNewClient({...newClient, objective: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">Seleziona...</option>
+                  <option value="Dimagrire">Dimagrire</option>
+                  <option value="Massa muscolare">Massa muscolare</option>
+                  <option value="Tonificare">Tonificare</option>
+                  <option value="Salute generale">Salute generale</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Esperienza
+                </label>
+                <select
+                  value={newClient.experience}
+                  onChange={(e) => setNewClient({...newClient, experience: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">Seleziona...</option>
+                  <option value="Principiante">Principiante</option>
+                  <option value="Intermedio">Intermedio</option>
+                  <option value="Esperto">Esperto</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Giorni/Settimana
+                </label>
+                <select
+                  value={newClient.daysPerWeek}
+                  onChange={(e) => setNewClient({...newClient, daysPerWeek: parseInt(e.target.value)})}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value={2}>2 giorni</option>
+                  <option value={3}>3 giorni</option>
+                  <option value={4}>4 giorni</option>
+                  <option value={5}>5 giorni</option>
+                  <option value={6}>6 giorni</option>
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
+                >
+                  {loading ? 'Creazione...' : 'Crea Cliente'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
