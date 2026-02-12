@@ -507,7 +507,7 @@ app.post('/webhook', identifyTenantFromWhatsApp, async (req, res) => {
 
     const tenantId = req.tenantId;
     const tenant = req.tenant;
-    const instanceName = tenant.whatsapp_instance_name || 'coach-ai';
+    const instanceName = tenant.whatsapp_instance_name || 'palestra';
 
     const event = body.event;
 
@@ -717,7 +717,7 @@ async function processCheckin(tenantId, tenant, phoneNumber) {
         const referrer = await db.getClient(tenantId, completedReferral.referrer_phone);
         referralBonus = `\n\n🎉 *Bonus sbloccato!*\nTu e ${referrer?.name || 'il tuo amico'} avete ricevuto un premio!\nScrivi "premi" per vedere il tuo bonus!`;
 
-        const instanceName = tenant.whatsapp_instance_name || 'coach-ai';
+        const instanceName = tenant.whatsapp_instance_name || 'palestra';
         const referrerRewardMsg = `🎉 *Grande notizia!*\n\n${clientName} ha fatto il primo check-in!\n\nHai guadagnato una settimana gratuita! 🎁\nScrivi "premi" per vedere i dettagli.`;
         await sendWhatsAppMessage(instanceName, completedReferral.referrer_phone, referrerRewardMsg);
       }
@@ -899,7 +899,7 @@ async function detectAndSaveWorkoutPlan(tenantId, tenant, phoneNumber, aiRespons
 
     // Invia link alla scheda web invece del PDF
     try {
-      const instanceName = tenant.whatsapp_instance_name || 'coach-ai';
+      const instanceName = tenant.whatsapp_instance_name || 'palestra';
 
       // Genera URL della scheda (usa variabile d'ambiente o default)
       const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
@@ -1617,7 +1617,7 @@ app.get('/api/reminders/config', legacyTenant, async (req, res) => {
 // WhatsApp status
 app.get('/api/whatsapp/status', legacyTenant, async (req, res) => {
   try {
-    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+    const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
     console.log(`Checking WhatsApp status for instance: ${instanceName}`);
     console.log(`Evolution API URL: ${EVOLUTION_API_URL}`);
 
@@ -1766,7 +1766,7 @@ app.get('/api/conversations/:phone', legacyTenant, async (req, res) => {
 // Check-in QR code alias
 app.get('/api/checkin-qrcode', legacyTenant, async (req, res) => {
   try {
-    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+    const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
 
     const statusResponse = await axios.get(
       `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
@@ -1959,7 +1959,7 @@ app.post('/api/ai/reset', legacyTenant, async (req, res) => {
 // WhatsApp info alias
 app.get('/api/whatsapp/info', legacyTenant, async (req, res) => {
   try {
-    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+    const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
     console.log(`Getting WhatsApp info for instance: ${instanceName}`);
 
     const fetchResponse = await axios.get(
@@ -1990,7 +1990,7 @@ app.get('/api/whatsapp/info', legacyTenant, async (req, res) => {
 // WhatsApp QR code alias
 app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
   try {
-    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+    const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
     console.log(`Getting QR code for instance: ${instanceName}`);
 
     const statusResponse = await axios.get(
@@ -2031,7 +2031,7 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
 // WhatsApp disconnect alias
 app.post('/api/whatsapp/disconnect', legacyTenant, async (req, res) => {
   try {
-    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+    const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
 
     await axios.delete(
       `${EVOLUTION_API_URL}/instance/logout/${instanceName}`,
@@ -2048,7 +2048,7 @@ app.post('/api/whatsapp/disconnect', legacyTenant, async (req, res) => {
 // WhatsApp restart alias
 app.post('/api/whatsapp/restart', legacyTenant, async (req, res) => {
   try {
-    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+    const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
 
     await axios.put(
       `${EVOLUTION_API_URL}/instance/restart/${instanceName}`,
@@ -2066,7 +2066,7 @@ app.post('/api/whatsapp/restart', legacyTenant, async (req, res) => {
 // QR Code checkin (legacy)
 app.get('/api/legacy/checkin/qrcode', legacyTenant, async (req, res) => {
   try {
-    const instanceName = req.tenant?.whatsapp_instance_name || 'coach-ai';
+    const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
 
     const statusResponse = await axios.get(
       `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
