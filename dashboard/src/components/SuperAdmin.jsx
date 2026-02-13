@@ -4,7 +4,7 @@ import {
   Eye, Search, RefreshCw, ChevronDown, ChevronUp, X, Check,
   TrendingUp, Smartphone, Calendar, LogIn, ArrowLeft, CreditCard,
   AlertTriangle, CheckCircle, Clock, FileText, Bell, Wifi, WifiOff,
-  Server, Database, Send, Shield
+  Server, Database, Send, Shield, Link2, Copy, ExternalLink
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -611,7 +611,52 @@ function HealthItem({ icon: Icon, label, status }) {
   )
 }
 
-function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImpersonate }) {
+function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImpersonate, onGenerateOnboarding }) {
+  const [onboardingUrl, setOnboardingUrl] = useState(null)
+  const [loadingOnboarding, setLoadingOnboarding] = useState(false)
+  const [showOnboardingModal, setShowOnboardingModal] = useState(false)
+
+  const generateOnboarding = async () => {
+    setLoadingOnboarding(true)
+    try {
+      const res = await fetch(`/api/superadmin/tenants/${tenant.id}/onboarding`, {
+        method: 'POST'
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setOnboardingUrl(data.url)
+        setShowOnboardingModal(true)
+      } else {
+        alert('Errore nella generazione del link')
+      }
+    } catch (err) {
+      alert('Errore: ' + err.message)
+    }
+    setLoadingOnboarding(false)
+  }
+
+  const checkOnboarding = async () => {
+    try {
+      const res = await fetch(`/api/superadmin/tenants/${tenant.id}/onboarding`)
+      if (res.ok) {
+        const data = await res.json()
+        if (data.hasOnboarding && data.status !== 'completed' && data.status !== 'expired') {
+          setOnboardingUrl(data.url)
+          setShowOnboardingModal(true)
+        } else {
+          generateOnboarding()
+        }
+      }
+    } catch (err) {
+      generateOnboarding()
+    }
+  }
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text)
+    alert('Link copiato!')
+  }
+
   return (
     <div className="hover:bg-gray-50">
       <div className="p-4 flex items-center gap-4">
@@ -649,6 +694,18 @@ function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImper
 
         <div className="flex items-center gap-2">
           <button
+            onClick={checkOnboarding}
+            className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
+            title="Genera Link Onboarding"
+            disabled={loadingOnboarding}
+          >
+            {loadingOnboarding ? (
+              <RefreshCw className="w-5 h-5 animate-spin" />
+            ) : (
+              <Link2 className="w-5 h-5" />
+            )}
+          </button>
+          <button
             onClick={onImpersonate}
             className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
             title="Accedi come questa palestra"
@@ -671,6 +728,56 @@ function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImper
           </button>
         </div>
       </div>
+
+      {/* Onboarding Modal */}
+      {showOnboardingModal && onboardingUrl && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Link Onboarding</h3>
+              <button onClick={() => setShowOnboardingModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-green-50 rounded-lg p-4 mb-4">
+              <p className="text-sm text-green-700 mb-2">
+                <CheckCircle className="w-4 h-4 inline mr-2" />
+                Link generato per: <strong>{tenant.name}</strong>
+              </p>
+              <p className="text-xs text-green-600">
+                Il proprietario della palestra può usare questo link per completare la configurazione autonomamente.
+              </p>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-3 mb-4">
+              <p className="text-xs text-gray-500 mb-1">URL Onboarding:</p>
+              <p className="text-sm font-mono text-gray-800 break-all">{onboardingUrl}</p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => copyToClipboard(onboardingUrl)}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              >
+                <Copy className="w-5 h-5" />
+                Copia Link
+              </button>
+              <button
+                onClick={() => window.open(onboardingUrl, '_blank')}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-500 text-white hover:bg-green-600 rounded-lg transition-colors"
+              >
+                <ExternalLink className="w-5 h-5" />
+                Apri
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500 text-center mt-4">
+              Il link scade tra 7 giorni. Puoi generarne uno nuovo in qualsiasi momento.
+            </p>
+          </div>
+        </div>
+      )}
 
       {expanded && (
         <div className="px-4 pb-4 pl-16 space-y-4">

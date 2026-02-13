@@ -873,6 +873,118 @@ async function addAuditLog(tenantId, userId, action, entityType, entityId, detai
   `, [tenantId, userId, action, entityType, entityId, details ? JSON.stringify(details) : null, ipAddress]);
 }
 
+// ========== ONBOARDING ==========
+
+const crypto = require('crypto');
+
+async function createOnboardingToken(tenantId, expiresInDays = 7) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + expiresInDays);
+
+  const result = await pool.query(`
+    INSERT INTO onboarding_tokens (tenant_id, token, expires_at)
+    VALUES ($1, $2, $3)
+    RETURNING *
+  `, [tenantId, token, expiresAt]);
+
+  return result.rows[0];
+}
+
+async function getOnboardingByToken(token) {
+  const result = await pool.query(`
+    SELECT ot.*, t.name as tenant_name, t.slug as tenant_slug
+    FROM onboarding_tokens ot
+    JOIN tenants t ON ot.tenant_id = t.id
+    WHERE ot.token = $1
+  `, [token]);
+  return result.rows[0] || null;
+}
+
+async function getOnboardingByTenant(tenantId) {
+  const result = await pool.query(`
+    SELECT * FROM onboarding_tokens
+    WHERE tenant_id = $1
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [tenantId]);
+  return result.rows[0] || null;
+}
+
+async function updateOnboardingProgress(token, step, stepData) {
+  const result = await pool.query(`
+    UPDATE onboarding_tokens
+    SET current_step = $2,
+        step_data = step_data || $3::jsonb,
+        status = CASE WHEN status = 'pending' THEN 'in_progress' ELSE status END,
+        started_at = COALESCE(started_at, NOW())
+    WHERE token = $1
+    RETURNING *
+  `, [token, step, JSON.stringify(stepData)]);
+  return result.rows[0];
+}
+
+async function completeOnboarding(token) {
+  // Aggiorna token come completato
+  const tokenResult = await pool.query(`
+    UPDATE onboarding_tokens
+    SET status = 'completed', completed_at = NOW(), current_step = 4
+    WHERE token = $1
+    RETURNING *
+  `, [token]);
+
+  if (tokenResult.rows[0]) {
+    // Aggiorna anche il tenant
+    await pool.query(`
+      UPDATE tenants
+      SET onboarding_completed = TRUE
+      WHERE id = $1
+    `, [tokenResult.rows[0].tenant_id]);
+  }
+
+  return tokenResult.rows[0];
+}
+
+async function updateTenantOnboardingData(tenantId, data) {
+  const fields = [];
+  const values = [];
+  let paramIndex = 1;
+
+  const allowedFields = [
+    'name', 'coach_name', 'coach_tone', 'welcome_message',
+    'gym_address', 'gym_phone', 'gym_hours', 'logo_url',
+    'whatsapp_instance_name', 'whatsapp_connected'
+  ];
+
+  for (const [key, value] of Object.entries(data)) {
+    const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+    if (allowedFields.includes(snakeKey)) {
+      fields.push(`${snakeKey} = $${paramIndex}`);
+      values.push(value);
+      paramIndex++;
+    }
+  }
+
+  if (fields.length === 0) return getTenant(tenantId);
+
+  values.push(tenantId);
+  const result = await pool.query(`
+    UPDATE tenants SET ${fields.join(', ')}, updated_at = NOW()
+    WHERE id = $${paramIndex}
+    RETURNING *
+  `, values);
+
+  return result.rows[0];
+}
+
+async function expireOldOnboardingTokens() {
+  await pool.query(`
+    UPDATE onboarding_tokens
+    SET status = 'expired'
+    WHERE status IN ('pending', 'in_progress') AND expires_at < NOW()
+  `);
+}
+
 // ========== AUTOMATION ==========
 
 async function getAllActiveTenants() {
@@ -1180,5 +1292,14 @@ module.exports = {
   getAutomationStats,
   getCheckinsForFollowup,
   getActiveClients,
-  getClientByPhone
+  getClientByPhone,
+
+  // Onboarding
+  createOnboardingToken,
+  getOnboardingByToken,
+  getOnboardingByTenant,
+  updateOnboardingProgress,
+  completeOnboarding,
+  updateTenantOnboardingData,
+  expireOldOnboardingTokens
 };

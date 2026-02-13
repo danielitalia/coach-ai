@@ -2536,6 +2536,290 @@ app.get('/api/monitoring/stats', async (req, res) => {
   }
 });
 
+// ========== ONBOARDING API ENDPOINTS ==========
+
+// Generate onboarding link for a tenant (SuperAdmin)
+app.post('/api/superadmin/tenants/:id/onboarding', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check tenant exists
+    const tenant = await db.getTenant(id);
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant non trovato' });
+    }
+
+    // Create onboarding token
+    const onboarding = await db.createOnboardingToken(id, 7); // expires in 7 days
+
+    const baseUrl = process.env.DASHBOARD_URL || 'https://coachpalestra.it';
+    const onboardingUrl = `${baseUrl}/onboarding/${onboarding.token}`;
+
+    res.json({
+      success: true,
+      token: onboarding.token,
+      url: onboardingUrl,
+      expiresAt: onboarding.expires_at
+    });
+  } catch (error) {
+    console.error('Errore generazione link onboarding:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get onboarding status for a tenant (SuperAdmin)
+app.get('/api/superadmin/tenants/:id/onboarding', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const onboarding = await db.getOnboardingByTenant(id);
+    if (!onboarding) {
+      return res.json({ hasOnboarding: false });
+    }
+
+    const baseUrl = process.env.DASHBOARD_URL || 'https://coachpalestra.it';
+
+    res.json({
+      hasOnboarding: true,
+      token: onboarding.token,
+      url: `${baseUrl}/onboarding/${onboarding.token}`,
+      status: onboarding.status,
+      currentStep: onboarding.current_step,
+      expiresAt: onboarding.expires_at,
+      startedAt: onboarding.started_at,
+      completedAt: onboarding.completed_at
+    });
+  } catch (error) {
+    console.error('Errore get onboarding status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUBLIC: Get onboarding data by token (for wizard)
+app.get('/api/onboarding/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    const onboarding = await db.getOnboardingByToken(token);
+    if (!onboarding) {
+      return res.status(404).json({ error: 'Link di onboarding non valido' });
+    }
+
+    // Check if expired
+    if (new Date(onboarding.expires_at) < new Date()) {
+      return res.status(410).json({ error: 'Link di onboarding scaduto' });
+    }
+
+    // Check if already completed
+    if (onboarding.status === 'completed') {
+      return res.status(410).json({ error: 'Onboarding già completato' });
+    }
+
+    // Get tenant info
+    const tenant = await db.getTenant(onboarding.tenant_id);
+
+    res.json({
+      token: onboarding.token,
+      status: onboarding.status,
+      currentStep: onboarding.current_step,
+      stepData: onboarding.step_data || {},
+      expiresAt: onboarding.expires_at,
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        coachName: tenant.coach_name,
+        coachTone: tenant.coach_tone,
+        welcomeMessage: tenant.welcome_message,
+        gymAddress: tenant.gym_address,
+        gymPhone: tenant.gym_phone,
+        gymHours: tenant.gym_hours,
+        logoUrl: tenant.logo_url,
+        whatsappInstanceName: tenant.whatsapp_instance_name
+      }
+    });
+  } catch (error) {
+    console.error('Errore get onboarding:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUBLIC: Save progress on a step
+app.post('/api/onboarding/:token/step/:step', async (req, res) => {
+  try {
+    const { token, step } = req.params;
+    const stepData = req.body;
+
+    const onboarding = await db.getOnboardingByToken(token);
+    if (!onboarding) {
+      return res.status(404).json({ error: 'Link di onboarding non valido' });
+    }
+
+    if (new Date(onboarding.expires_at) < new Date()) {
+      return res.status(410).json({ error: 'Link di onboarding scaduto' });
+    }
+
+    if (onboarding.status === 'completed') {
+      return res.status(410).json({ error: 'Onboarding già completato' });
+    }
+
+    const stepNum = parseInt(step);
+
+    // Save step data
+    const stepKey = `step${stepNum}`;
+    const updatedOnboarding = await db.updateOnboardingProgress(token, stepNum, { [stepKey]: stepData });
+
+    // Also update tenant data based on step
+    if (stepNum === 1) {
+      // Step 1: Gym Info
+      await db.updateTenantOnboardingData(onboarding.tenant_id, {
+        name: stepData.name,
+        gym_address: stepData.address,
+        gym_phone: stepData.phone,
+        gym_hours: stepData.hours,
+        logo_url: stepData.logoUrl
+      });
+    } else if (stepNum === 3) {
+      // Step 3: Coach customization
+      await db.updateTenantOnboardingData(onboarding.tenant_id, {
+        coach_name: stepData.coachName,
+        coach_tone: stepData.coachTone,
+        welcome_message: stepData.welcomeMessage
+      });
+    }
+
+    res.json({
+      success: true,
+      currentStep: updatedOnboarding.current_step,
+      status: updatedOnboarding.status
+    });
+  } catch (error) {
+    console.error('Errore save step:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUBLIC: Get WhatsApp QR for onboarding (Step 2)
+app.get('/api/onboarding/:token/whatsapp/qrcode', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    const onboarding = await db.getOnboardingByToken(token);
+    if (!onboarding) {
+      return res.status(404).json({ error: 'Link di onboarding non valido' });
+    }
+
+    const tenant = await db.getTenant(onboarding.tenant_id);
+    const instanceName = tenant?.whatsapp_instance_name;
+
+    if (!instanceName) {
+      return res.status(400).json({ error: 'Istanza WhatsApp non configurata. Contatta il supporto.' });
+    }
+
+    // Check connection status
+    const statusResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => null);
+
+    if (statusResponse?.data?.instance?.state === 'open') {
+      // Update tenant as connected
+      await db.updateTenantOnboardingData(onboarding.tenant_id, { whatsapp_connected: true });
+      return res.json({ connected: true });
+    }
+
+    // Get QR code
+    const qrResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(err => {
+      console.error('QR fetch error:', err.message);
+      return null;
+    });
+
+    res.json({
+      connected: false,
+      qrcode: qrResponse?.data?.base64 || qrResponse?.data?.qrcode?.base64,
+      pairingCode: qrResponse?.data?.pairingCode
+    });
+  } catch (error) {
+    console.error('Errore WhatsApp QR onboarding:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUBLIC: Check WhatsApp connection status for onboarding
+app.get('/api/onboarding/:token/whatsapp/status', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    const onboarding = await db.getOnboardingByToken(token);
+    if (!onboarding) {
+      return res.status(404).json({ error: 'Link di onboarding non valido' });
+    }
+
+    const tenant = await db.getTenant(onboarding.tenant_id);
+    const instanceName = tenant?.whatsapp_instance_name;
+
+    if (!instanceName) {
+      return res.json({ connected: false, error: 'Istanza non configurata' });
+    }
+
+    const statusResponse = await axios.get(
+      `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => null);
+
+    const isConnected = statusResponse?.data?.instance?.state === 'open';
+
+    if (isConnected) {
+      await db.updateTenantOnboardingData(onboarding.tenant_id, { whatsapp_connected: true });
+    }
+
+    res.json({ connected: isConnected });
+  } catch (error) {
+    console.error('Errore WhatsApp status onboarding:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUBLIC: Complete onboarding
+app.post('/api/onboarding/:token/complete', async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    const onboarding = await db.getOnboardingByToken(token);
+    if (!onboarding) {
+      return res.status(404).json({ error: 'Link di onboarding non valido' });
+    }
+
+    if (onboarding.status === 'completed') {
+      return res.status(410).json({ error: 'Onboarding già completato' });
+    }
+
+    // Complete the onboarding
+    await db.completeOnboarding(token);
+
+    // Send Telegram notification
+    const monitoring = req.app.locals.monitoring;
+    if (monitoring) {
+      const tenant = await db.getTenant(onboarding.tenant_id);
+      await monitoring.sendTelegramAlert(
+        `✅ Nuova palestra configurata!`,
+        `La palestra "${tenant.name}" ha completato l'onboarding ed è pronta per l'uso.`,
+        'info'
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'Onboarding completato! La tua palestra è pronta.'
+    });
+  } catch (error) {
+    console.error('Errore complete onboarding:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== AVVIO SERVER ==========
 
 async function startServer() {
@@ -2546,7 +2830,8 @@ async function startServer() {
     // Run migrations
     const migrations = [
       { name: 'automation', file: '003-automation.sql' },
-      { name: 'monitoring', file: '005-monitoring.sql' }
+      { name: 'monitoring', file: '005-monitoring.sql' },
+      { name: 'onboarding', file: '006-onboarding.sql' }
     ];
 
     for (const migration of migrations) {

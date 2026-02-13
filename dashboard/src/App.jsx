@@ -20,6 +20,7 @@ import CheckIn from './components/CheckIn'
 import Referral from './components/Referral'
 import Automations from './components/Automations'
 import SuperAdmin from './components/SuperAdmin'
+import OnboardingWizard from './components/OnboardingWizard'
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -405,6 +406,7 @@ function App() {
           <Route path="/login" element={<LoginPageWrapper />} />
           <Route path="/register" element={<RegisterPageWrapper />} />
           <Route path="/superadmin" element={<SuperAdmin />} />
+          <Route path="/onboarding/:token" element={<OnboardingWizard />} />
           <Route path="/*" element={
             <ProtectedRoute>
               <MainLayout />
