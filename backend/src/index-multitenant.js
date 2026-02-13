@@ -18,6 +18,9 @@ const { requireTenant, identifyTenantFromWhatsApp } = require('./middleware/auth
 // Marketing Automation
 const automation = require('./automation');
 
+// Monitoring System
+const MonitoringSystem = require('./monitoring');
+
 // Directory per salvare i PDF delle schede
 const WORKOUTS_DIR = path.join(__dirname, '../workouts');
 if (!fs.existsSync(WORKOUTS_DIR)) {
@@ -2443,6 +2446,96 @@ app.get('/api/superadmin/tenants/:id', async (req, res) => {
   }
 });
 
+// ========== MONITORING API ENDPOINTS ==========
+
+// Get system health status
+app.get('/api/monitoring/health', async (req, res) => {
+  try {
+    const monitoring = req.app.locals.monitoring;
+    if (!monitoring) {
+      return res.status(503).json({ error: 'Monitoring not initialized' });
+    }
+
+    const results = await monitoring.forceCheck();
+    res.json(results);
+  } catch (error) {
+    console.error('Error in health check:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get recent alerts
+app.get('/api/monitoring/alerts', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+
+    const result = await db.pool.query(`
+      SELECT * FROM monitoring_alerts
+      ORDER BY created_at DESC
+      LIMIT $1
+    `, [limit]);
+
+    res.json({ alerts: result.rows });
+  } catch (error) {
+    // Table might not exist yet
+    res.json({ alerts: [] });
+  }
+});
+
+// Acknowledge an alert
+app.post('/api/monitoring/alerts/:id/acknowledge', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.pool.query(`
+      UPDATE monitoring_alerts
+      SET acknowledged = true, acknowledged_at = NOW()
+      WHERE id = $1
+    `, [id]);
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test Telegram connection
+app.post('/api/monitoring/test-telegram', async (req, res) => {
+  try {
+    const monitoring = req.app.locals.monitoring;
+    if (!monitoring) {
+      return res.status(503).json({ error: 'Monitoring not initialized' });
+    }
+
+    await monitoring.testTelegram();
+    res.json({ success: true, message: 'Test alert sent to Telegram' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get monitoring stats
+app.get('/api/monitoring/stats', async (req, res) => {
+  try {
+    const stats = await db.pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM monitoring_alerts WHERE created_at > NOW() - INTERVAL '24 hours') as alerts_24h,
+        (SELECT COUNT(*) FROM monitoring_alerts WHERE severity = 'error' AND acknowledged = false) as unacknowledged_errors,
+        (SELECT COUNT(*) FROM tenants WHERE whatsapp_connected = true) as connected_tenants,
+        (SELECT COUNT(*) FROM tenants WHERE whatsapp_connected = false AND whatsapp_instance_name IS NOT NULL) as disconnected_tenants
+    `);
+
+    res.json(stats.rows[0]);
+  } catch (error) {
+    res.json({
+      alerts_24h: 0,
+      unacknowledged_errors: 0,
+      connected_tenants: 0,
+      disconnected_tenants: 0
+    });
+  }
+});
+
 // ========== AVVIO SERVER ==========
 
 async function startServer() {
@@ -2450,18 +2543,24 @@ async function startServer() {
     await db.initDatabase();
     console.log('Database PostgreSQL connesso');
 
-    // Run migration for automation tables
-    try {
-      const migrationPath = path.join(__dirname, '../db/migrations/003-automation.sql');
-      if (fs.existsSync(migrationPath)) {
-        const migration = fs.readFileSync(migrationPath, 'utf8');
-        await db.pool.query(migration);
-        console.log('Automation tables migrated');
-      }
-    } catch (migrationError) {
-      // Ignore if tables already exist
-      if (!migrationError.message.includes('already exists')) {
-        console.log('Automation migration note:', migrationError.message);
+    // Run migrations
+    const migrations = [
+      { name: 'automation', file: '003-automation.sql' },
+      { name: 'monitoring', file: '005-monitoring.sql' }
+    ];
+
+    for (const migration of migrations) {
+      try {
+        const migrationPath = path.join(__dirname, `../db/migrations/${migration.file}`);
+        if (fs.existsSync(migrationPath)) {
+          const sql = fs.readFileSync(migrationPath, 'utf8');
+          await db.pool.query(sql);
+          console.log(`${migration.name} tables migrated`);
+        }
+      } catch (migrationError) {
+        if (!migrationError.message.includes('already exists')) {
+          console.log(`${migration.name} migration note:`, migrationError.message);
+        }
       }
     }
 
@@ -2469,10 +2568,23 @@ async function startServer() {
     automation.init(db, sendWhatsAppMessage);
     automation.start();
 
+    // Initialize and start monitoring system
+    const monitoring = new MonitoringSystem(db, {
+      telegramToken: process.env.TELEGRAM_BOT_TOKEN,
+      telegramChatId: process.env.TELEGRAM_CHAT_ID,
+      evolutionApiUrl: EVOLUTION_API_URL,
+      evolutionApiKey: EVOLUTION_API_KEY
+    });
+    monitoring.start();
+
+    // Expose monitoring for API endpoints
+    app.locals.monitoring = monitoring;
+
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log(`Coach AI Backend (Multi-Tenant) running on port ${PORT}`);
       console.log('Marketing Automation: ACTIVE');
+      console.log('Monitoring System: ACTIVE');
     });
   } catch (error) {
     console.error('Errore avvio server:', error);

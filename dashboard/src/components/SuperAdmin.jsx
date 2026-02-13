@@ -3,7 +3,8 @@ import {
   Building2, Users, MessageSquare, Activity, Plus, Edit, Trash2,
   Eye, Search, RefreshCw, ChevronDown, ChevronUp, X, Check,
   TrendingUp, Smartphone, Calendar, LogIn, ArrowLeft, CreditCard,
-  AlertTriangle, CheckCircle, Clock, FileText
+  AlertTriangle, CheckCircle, Clock, FileText, Bell, Wifi, WifiOff,
+  Server, Database, Send, Shield
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -92,6 +93,7 @@ function SuperAdmin() {
 }
 
 function SuperAdminDashboard({ onLogout }) {
+  const [activeTab, setActiveTab] = useState('tenants') // 'tenants' or 'monitoring'
   const [tenants, setTenants] = useState([])
   const [globalStats, setGlobalStats] = useState({
     totalTenants: 0,
@@ -106,9 +108,21 @@ function SuperAdminDashboard({ onLogout }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [expandedTenant, setExpandedTenant] = useState(null)
 
+  // Monitoring state
+  const [monitoringStats, setMonitoringStats] = useState(null)
+  const [healthStatus, setHealthStatus] = useState(null)
+  const [alerts, setAlerts] = useState([])
+  const [monitoringLoading, setMonitoringLoading] = useState(false)
+
   useEffect(() => {
     fetchData()
   }, [])
+
+  useEffect(() => {
+    if (activeTab === 'monitoring') {
+      fetchMonitoringData()
+    }
+  }, [activeTab])
 
   const fetchData = async () => {
     setLoading(true)
@@ -130,6 +144,49 @@ function SuperAdminDashboard({ onLogout }) {
     t.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     t.slug?.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  const fetchMonitoringData = async () => {
+    setMonitoringLoading(true)
+    try {
+      const [statsRes, healthRes, alertsRes] = await Promise.all([
+        fetch('/api/monitoring/stats'),
+        fetch('/api/monitoring/health'),
+        fetch('/api/monitoring/alerts?limit=20')
+      ])
+
+      if (statsRes.ok) setMonitoringStats(await statsRes.json())
+      if (healthRes.ok) setHealthStatus(await healthRes.json())
+      if (alertsRes.ok) {
+        const data = await alertsRes.json()
+        setAlerts(data.alerts || [])
+      }
+    } catch (err) {
+      console.error('Error fetching monitoring data:', err)
+    }
+    setMonitoringLoading(false)
+  }
+
+  const testTelegram = async () => {
+    try {
+      const res = await fetch('/api/monitoring/test-telegram', { method: 'POST' })
+      if (res.ok) {
+        alert('Test alert inviato a Telegram!')
+      } else {
+        alert('Errore nell\'invio del test')
+      }
+    } catch (err) {
+      alert('Errore: ' + err.message)
+    }
+  }
+
+  const acknowledgeAlert = async (alertId) => {
+    try {
+      await fetch(`/api/monitoring/alerts/${alertId}/acknowledge`, { method: 'POST' })
+      fetchMonitoringData()
+    } catch (err) {
+      console.error('Error acknowledging alert:', err)
+    }
+  }
 
   const handleDeleteTenant = async (tenantId) => {
     if (!window.confirm('Sei sicuro di voler eliminare questa palestra? Questa azione è irreversibile.')) {
@@ -168,107 +225,318 @@ function SuperAdminDashboard({ onLogout }) {
               <p className="text-gray-400 text-sm">Gestione Palestre</p>
             </div>
           </div>
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Esci
-          </button>
+          <div className="flex items-center gap-4">
+            {/* Tabs */}
+            <div className="flex bg-gray-800 rounded-lg p-1">
+              <button
+                onClick={() => setActiveTab('tenants')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'tenants' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Building2 className="w-4 h-4 inline mr-2" />
+                Palestre
+              </button>
+              <button
+                onClick={() => setActiveTab('monitoring')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'monitoring' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Shield className="w-4 h-4 inline mr-2" />
+                Monitoring
+              </button>
+            </div>
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Esci
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
-        {/* Global Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard
-            icon={Building2}
-            label="Palestre Totali"
-            value={globalStats.totalTenants}
-            color="red"
-          />
-          <StatCard
-            icon={Users}
-            label="Clienti Totali"
-            value={globalStats.totalClients}
-            color="blue"
-          />
-          <StatCard
-            icon={MessageSquare}
-            label="Messaggi Totali"
-            value={globalStats.totalMessages}
-            color="purple"
-          />
-          <StatCard
-            icon={Activity}
-            label="Attivi Oggi"
-            value={globalStats.activeToday}
-            color="green"
-          />
-        </div>
+        {/* TENANTS TAB */}
+        {activeTab === 'tenants' && (
+          <>
+            {/* Global Stats */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              <StatCard
+                icon={Building2}
+                label="Palestre Totali"
+                value={globalStats.totalTenants}
+                color="red"
+              />
+              <StatCard
+                icon={Users}
+                label="Clienti Totali"
+                value={globalStats.totalClients}
+                color="blue"
+              />
+              <StatCard
+                icon={MessageSquare}
+                label="Messaggi Totali"
+                value={globalStats.totalMessages}
+                color="purple"
+              />
+              <StatCard
+                icon={Activity}
+                label="Attivi Oggi"
+                value={globalStats.activeToday}
+                color="green"
+              />
+            </div>
 
-        {/* Tenants List */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-          <div className="p-6 border-b border-gray-200">
-            <div className="flex flex-col sm:flex-row gap-4 justify-between">
-              <h2 className="text-xl font-bold text-gray-900">Palestre</h2>
-              <div className="flex gap-3">
-                <div className="relative">
-                  <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Cerca palestra..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                  />
+            {/* Tenants List */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <div className="flex flex-col sm:flex-row gap-4 justify-between">
+                  <h2 className="text-xl font-bold text-gray-900">Palestre</h2>
+                  <div className="flex gap-3">
+                    <div className="relative">
+                      <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Cerca palestra..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                      />
+                    </div>
+                    <button
+                      onClick={() => fetchData()}
+                      className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                    >
+                      <RefreshCw className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => setShowCreateModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                    >
+                      <Plus className="w-5 h-5" />
+                      Nuova Palestra
+                    </button>
+                  </div>
                 </div>
+              </div>
+
+              {loading ? (
+                <div className="p-12 text-center">
+                  <RefreshCw className="w-8 h-8 animate-spin mx-auto text-gray-400" />
+                  <p className="text-gray-500 mt-2">Caricamento...</p>
+                </div>
+              ) : filteredTenants.length === 0 ? (
+                <div className="p-12 text-center">
+                  <Building2 className="w-12 h-12 mx-auto text-gray-300 mb-4" />
+                  <p className="text-gray-500">Nessuna palestra trovata</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {filteredTenants.map((tenant) => (
+                    <TenantRow
+                      key={tenant.id}
+                      tenant={tenant}
+                      expanded={expandedTenant === tenant.id}
+                      onToggleExpand={() => setExpandedTenant(expandedTenant === tenant.id ? null : tenant.id)}
+                      onEdit={() => {
+                        setSelectedTenant(tenant)
+                        setShowEditModal(true)
+                      }}
+                      onDelete={() => handleDeleteTenant(tenant.id)}
+                      onImpersonate={() => handleImpersonate(tenant)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* MONITORING TAB */}
+        {activeTab === 'monitoring' && (
+          <>
+            {/* Monitoring Stats */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+              <StatCard
+                icon={Wifi}
+                label="WhatsApp Connessi"
+                value={monitoringStats?.connected_tenants || 0}
+                color="green"
+              />
+              <StatCard
+                icon={WifiOff}
+                label="WhatsApp Disconnessi"
+                value={monitoringStats?.disconnected_tenants || 0}
+                color="red"
+              />
+              <StatCard
+                icon={Bell}
+                label="Alert (24h)"
+                value={monitoringStats?.alerts_24h || 0}
+                color="purple"
+              />
+              <StatCard
+                icon={AlertTriangle}
+                label="Errori da Risolvere"
+                value={monitoringStats?.unacknowledged_errors || 0}
+                color="red"
+              />
+            </div>
+
+            {/* Health Status */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+              {/* System Health */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-gray-900">Stato Sistemi</h3>
+                  <button
+                    onClick={fetchMonitoringData}
+                    className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                    disabled={monitoringLoading}
+                  >
+                    <RefreshCw className={`w-5 h-5 ${monitoringLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+
+                {healthStatus ? (
+                  <div className="space-y-3">
+                    <HealthItem
+                      icon={Database}
+                      label="Database"
+                      status={healthStatus.database?.healthy ? 'online' : 'offline'}
+                    />
+                    <HealthItem
+                      icon={Server}
+                      label="Evolution API"
+                      status={healthStatus.evolutionApi?.healthy ? 'online' : 'offline'}
+                    />
+                    <div className="border-t pt-3 mt-3">
+                      <p className="text-sm text-gray-500 mb-2">WhatsApp per Tenant:</p>
+                      {healthStatus.whatsappConnections?.map((t, i) => (
+                        <div key={i} className="flex items-center justify-between py-1">
+                          <span className="text-sm text-gray-700">{t.name}</span>
+                          <span className={`text-xs px-2 py-1 rounded-full ${
+                            t.connected
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {t.connected ? 'Connesso' : t.reason || 'Disconnesso'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    {monitoringLoading ? 'Caricamento...' : 'Clicca refresh per controllare'}
+                  </div>
+                )}
+              </div>
+
+              {/* Telegram Config */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h3 className="font-bold text-gray-900 mb-4">Configurazione Alert</h3>
+
+                <div className="bg-blue-50 rounded-lg p-4 mb-4">
+                  <p className="text-sm text-blue-700">
+                    <Bell className="w-4 h-4 inline mr-2" />
+                    Gli alert vengono inviati via Telegram quando:
+                  </p>
+                  <ul className="text-sm text-blue-600 mt-2 ml-6 list-disc">
+                    <li>WhatsApp si disconnette</li>
+                    <li>Database non raggiungibile</li>
+                    <li>Evolution API down</li>
+                    <li>Abbonamenti in scadenza</li>
+                  </ul>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="font-medium text-gray-900">Report Giornaliero</p>
+                      <p className="text-sm text-gray-500">Ogni giorno alle 9:00</p>
+                    </div>
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="font-medium text-gray-900">Health Check</p>
+                      <p className="text-sm text-gray-500">Ogni 5 minuti</p>
+                    </div>
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="font-medium text-gray-900">Alert Abbonamenti</p>
+                      <p className="text-sm text-gray-500">7 giorni prima della scadenza</p>
+                    </div>
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                  </div>
+                </div>
+
                 <button
-                  onClick={() => fetchData()}
-                  className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                  onClick={testTelegram}
+                  className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
                 >
-                  <RefreshCw className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => setShowCreateModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-                >
-                  <Plus className="w-5 h-5" />
-                  Nuova Palestra
+                  <Send className="w-5 h-5" />
+                  Invia Test Alert
                 </button>
               </div>
             </div>
-          </div>
 
-          {loading ? (
-            <div className="p-12 text-center">
-              <RefreshCw className="w-8 h-8 animate-spin mx-auto text-gray-400" />
-              <p className="text-gray-500 mt-2">Caricamento...</p>
+            {/* Recent Alerts */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+              <div className="p-6 border-b border-gray-200">
+                <h3 className="font-bold text-gray-900">Alert Recenti</h3>
+              </div>
+
+              {alerts.length === 0 ? (
+                <div className="p-12 text-center">
+                  <CheckCircle className="w-12 h-12 mx-auto text-green-300 mb-4" />
+                  <p className="text-gray-500">Nessun alert recente</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {alerts.map((alert) => (
+                    <div key={alert.id} className="p-4 hover:bg-gray-50">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${
+                              alert.severity === 'error' ? 'bg-red-500' :
+                              alert.severity === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'
+                            }`} />
+                            <span className="font-medium text-gray-900">{alert.title}</span>
+                            {alert.acknowledged && (
+                              <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                                Risolto
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1 whitespace-pre-wrap">{alert.message}</p>
+                          <p className="text-xs text-gray-400 mt-2">
+                            {new Date(alert.created_at).toLocaleString('it-IT')}
+                          </p>
+                        </div>
+                        {!alert.acknowledged && (
+                          <button
+                            onClick={() => acknowledgeAlert(alert.id)}
+                            className="px-3 py-1 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg"
+                          >
+                            Risolvi
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          ) : filteredTenants.length === 0 ? (
-            <div className="p-12 text-center">
-              <Building2 className="w-12 h-12 mx-auto text-gray-300 mb-4" />
-              <p className="text-gray-500">Nessuna palestra trovata</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {filteredTenants.map((tenant) => (
-                <TenantRow
-                  key={tenant.id}
-                  tenant={tenant}
-                  expanded={expandedTenant === tenant.id}
-                  onToggleExpand={() => setExpandedTenant(expandedTenant === tenant.id ? null : tenant.id)}
-                  onEdit={() => {
-                    setSelectedTenant(tenant)
-                    setShowEditModal(true)
-                  }}
-                  onDelete={() => handleDeleteTenant(tenant.id)}
-                  onImpersonate={() => handleImpersonate(tenant)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+          </>
+        )}
       </main>
 
       {/* Create Modal */}
@@ -319,6 +587,25 @@ function StatCard({ icon: Icon, label, value, color }) {
         <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${colorClasses[color]}`}>
           <Icon className="w-6 h-6" />
         </div>
+      </div>
+    </div>
+  )
+}
+
+function HealthItem({ icon: Icon, label, status }) {
+  const isOnline = status === 'online'
+
+  return (
+    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+      <div className="flex items-center gap-3">
+        <Icon className={`w-5 h-5 ${isOnline ? 'text-green-600' : 'text-red-600'}`} />
+        <span className="font-medium text-gray-900">{label}</span>
+      </div>
+      <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${
+        isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+      }`}>
+        {isOnline ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+        <span className="text-sm font-medium">{isOnline ? 'Online' : 'Offline'}</span>
       </div>
     </div>
   )
