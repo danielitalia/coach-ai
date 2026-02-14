@@ -2830,6 +2830,113 @@ app.post('/api/onboarding/:token/complete', async (req, res) => {
   }
 });
 
+// ========== ANALYTICS ==========
+
+// Get analytics summary for tenant
+app.get('/api/analytics/summary', authMiddleware, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const summary = await db.getAnalyticsSummary(req.tenantId, days);
+    res.json(summary);
+  } catch (error) {
+    console.error('Errore analytics summary:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get analytics timeline (for charts)
+app.get('/api/analytics/timeline', authMiddleware, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const timeline = await db.getAnalyticsTimeline(req.tenantId, days);
+    res.json(timeline);
+  } catch (error) {
+    console.error('Errore analytics timeline:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get daily stats for a date range
+app.get('/api/analytics/daily', authMiddleware, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const end = endDate || new Date().toISOString().split('T')[0];
+    const start = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const stats = await db.getDailyStats(req.tenantId, start, end);
+    res.json(stats);
+  } catch (error) {
+    console.error('Errore daily stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get analytics events
+app.get('/api/analytics/events', authMiddleware, async (req, res) => {
+  try {
+    const { type, limit } = req.query;
+    const events = await db.getAnalyticsEvents(req.tenantId, type, parseInt(limit) || 100);
+    res.json(events);
+  } catch (error) {
+    console.error('Errore analytics events:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Backfill analytics data (manual trigger)
+app.post('/api/analytics/backfill', authMiddleware, async (req, res) => {
+  try {
+    const days = parseInt(req.body.days) || 30;
+    const results = await db.backfillAnalytics(req.tenantId, days);
+    res.json({ success: true, daysProcessed: results.length, dates: results });
+  } catch (error) {
+    console.error('Errore backfill analytics:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// SUPERADMIN: Get global analytics for all tenants
+app.get('/api/superadmin/analytics', authMiddleware, async (req, res) => {
+  try {
+    if (req.userRole !== 'superadmin') {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
+    }
+
+    const analytics = await db.getGlobalAnalytics();
+    res.json(analytics);
+  } catch (error) {
+    console.error('Errore global analytics:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// SUPERADMIN: Backfill analytics for all tenants
+app.post('/api/superadmin/analytics/backfill-all', authMiddleware, async (req, res) => {
+  try {
+    if (req.userRole !== 'superadmin') {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
+    }
+
+    const days = parseInt(req.body.days) || 30;
+    const tenants = await db.getAllTenants();
+    const results = [];
+
+    for (const tenant of tenants) {
+      try {
+        await db.backfillAnalytics(tenant.id, days);
+        results.push({ tenantId: tenant.id, name: tenant.name, success: true });
+      } catch (err) {
+        results.push({ tenantId: tenant.id, name: tenant.name, success: false, error: err.message });
+      }
+    }
+
+    res.json({ success: true, tenants: results });
+  } catch (error) {
+    console.error('Errore backfill all:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== AVVIO SERVER ==========
 
 async function startServer() {
@@ -2841,7 +2948,8 @@ async function startServer() {
     const migrations = [
       { name: 'automation', file: '003-automation.sql' },
       { name: 'monitoring', file: '005-monitoring.sql' },
-      { name: 'onboarding', file: '006-onboarding.sql' }
+      { name: 'onboarding', file: '006-onboarding.sql' },
+      { name: 'analytics', file: '007-analytics.sql' }
     ];
 
     for (const migration of migrations) {

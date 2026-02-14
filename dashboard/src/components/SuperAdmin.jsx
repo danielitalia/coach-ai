@@ -4,7 +4,8 @@ import {
   Eye, Search, RefreshCw, ChevronDown, ChevronUp, X, Check,
   TrendingUp, Smartphone, Calendar, LogIn, ArrowLeft, CreditCard,
   AlertTriangle, CheckCircle, Clock, FileText, Bell, Wifi, WifiOff,
-  Server, Database, Send, Shield, Link2, Copy, ExternalLink
+  Server, Database, Send, Shield, Link2, Copy, ExternalLink, BarChart3,
+  Loader2
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -114,6 +115,11 @@ function SuperAdminDashboard({ onLogout }) {
   const [alerts, setAlerts] = useState([])
   const [monitoringLoading, setMonitoringLoading] = useState(false)
 
+  // Analytics state
+  const [globalAnalytics, setGlobalAnalytics] = useState([])
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  const [backfillingAll, setBackfillingAll] = useState(false)
+
   useEffect(() => {
     fetchData()
   }, [])
@@ -121,6 +127,9 @@ function SuperAdminDashboard({ onLogout }) {
   useEffect(() => {
     if (activeTab === 'monitoring') {
       fetchMonitoringData()
+    }
+    if (activeTab === 'analytics') {
+      fetchAnalyticsData()
     }
   }, [activeTab])
 
@@ -188,6 +197,50 @@ function SuperAdminDashboard({ onLogout }) {
     }
   }
 
+  const fetchAnalyticsData = async () => {
+    setAnalyticsLoading(true)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/superadmin/analytics', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setGlobalAnalytics(data)
+      }
+    } catch (err) {
+      console.error('Error fetching analytics:', err)
+    }
+    setAnalyticsLoading(false)
+  }
+
+  const backfillAllAnalytics = async () => {
+    if (!confirm('Ricalcolare le statistiche per TUTTE le palestre? Potrebbe richiedere alcuni minuti.')) return
+
+    setBackfillingAll(true)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('/api/superadmin/analytics/backfill-all', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ days: 30 })
+      })
+
+      if (res.ok) {
+        alert('Statistiche ricalcolate per tutte le palestre!')
+        fetchAnalyticsData()
+      } else {
+        throw new Error('Errore backfill')
+      }
+    } catch (err) {
+      alert('Errore: ' + err.message)
+    }
+    setBackfillingAll(false)
+  }
+
   const handleDeleteTenant = async (tenantId) => {
     if (!window.confirm('Sei sicuro di voler eliminare questa palestra? Questa azione è irreversibile.')) {
       return
@@ -245,6 +298,15 @@ function SuperAdminDashboard({ onLogout }) {
               >
                 <Shield className="w-4 h-4 inline mr-2" />
                 Monitoring
+              </button>
+              <button
+                onClick={() => setActiveTab('analytics')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'analytics' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4 inline mr-2" />
+                Analytics
               </button>
             </div>
             <button
@@ -535,6 +597,141 @@ function SuperAdminDashboard({ onLogout }) {
                 </div>
               )}
             </div>
+          </>
+        )}
+
+        {/* ANALYTICS TAB */}
+        {activeTab === 'analytics' && (
+          <>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-gray-900">Analytics Globali</h2>
+              <button
+                onClick={backfillAllAnalytics}
+                disabled={backfillingAll}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${backfillingAll ? 'animate-spin' : ''}`} />
+                {backfillingAll ? 'Elaborazione...' : 'Ricalcola Tutte'}
+              </button>
+            </div>
+
+            {analyticsLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Palestra</th>
+                      <th className="px-4 py-4 text-center text-sm font-semibold text-gray-900">Stato</th>
+                      <th className="px-4 py-4 text-right text-sm font-semibold text-gray-900">Clienti</th>
+                      <th className="px-4 py-4 text-right text-sm font-semibold text-gray-900">Messaggi</th>
+                      <th className="px-4 py-4 text-right text-sm font-semibold text-gray-900">Check-in</th>
+                      <th className="px-4 py-4 text-right text-sm font-semibold text-gray-900">7gg Msg</th>
+                      <th className="px-4 py-4 text-right text-sm font-semibold text-gray-900">7gg Check</th>
+                      <th className="px-4 py-4 text-right text-sm font-semibold text-gray-900">Ultima Attivita</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {globalAnalytics.length === 0 ? (
+                      <tr>
+                        <td colSpan="8" className="px-6 py-12 text-center text-gray-500">
+                          Nessun dato analytics disponibile. Clicca "Ricalcola Tutte" per generare le statistiche.
+                        </td>
+                      </tr>
+                    ) : (
+                      globalAnalytics.map((tenant) => (
+                        <tr key={tenant.tenant_id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4">
+                            <div>
+                              <p className="font-medium text-gray-900">{tenant.tenant_name}</p>
+                              <p className="text-xs text-gray-500">{tenant.slug}</p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 text-center">
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                              tenant.whatsapp_connected
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-red-100 text-red-700'
+                            }`}>
+                              {tenant.whatsapp_connected ? (
+                                <><Wifi className="w-3 h-3" /> Online</>
+                              ) : (
+                                <><WifiOff className="w-3 h-3" /> Offline</>
+                              )}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 text-right font-medium text-gray-900">
+                            {tenant.total_clients || 0}
+                          </td>
+                          <td className="px-4 py-4 text-right text-gray-600">
+                            {tenant.total_messages || 0}
+                          </td>
+                          <td className="px-4 py-4 text-right text-gray-600">
+                            {tenant.total_checkins || 0}
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            <span className={`font-medium ${
+                              (tenant.messages_7d || 0) > 0 ? 'text-green-600' : 'text-gray-400'
+                            }`}>
+                              {tenant.messages_7d || 0}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 text-right">
+                            <span className={`font-medium ${
+                              (tenant.checkins_7d || 0) > 0 ? 'text-blue-600' : 'text-gray-400'
+                            }`}>
+                              {tenant.checkins_7d || 0}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 text-right text-sm text-gray-500">
+                            {tenant.last_message_at
+                              ? new Date(tenant.last_message_at).toLocaleDateString('it-IT', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })
+                              : '-'
+                            }
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+
+                {/* Summary Footer */}
+                {globalAnalytics.length > 0 && (
+                  <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">
+                        Totale: <strong className="text-gray-900">{globalAnalytics.length}</strong> palestre
+                      </span>
+                      <div className="flex items-center gap-6">
+                        <span className="text-gray-500">
+                          Clienti: <strong className="text-gray-900">
+                            {globalAnalytics.reduce((sum, t) => sum + (parseInt(t.total_clients) || 0), 0)}
+                          </strong>
+                        </span>
+                        <span className="text-gray-500">
+                          Messaggi 7gg: <strong className="text-green-600">
+                            {globalAnalytics.reduce((sum, t) => sum + (parseInt(t.messages_7d) || 0), 0)}
+                          </strong>
+                        </span>
+                        <span className="text-gray-500">
+                          Check-in 7gg: <strong className="text-blue-600">
+                            {globalAnalytics.reduce((sum, t) => sum + (parseInt(t.checkins_7d) || 0), 0)}
+                          </strong>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </main>

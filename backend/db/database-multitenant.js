@@ -1176,6 +1176,192 @@ async function getClientByPhone(tenantId, phone) {
   return getClient(tenantId, phone);
 }
 
+// ========== ANALYTICS ==========
+
+async function getDailyStats(tenantId, startDate, endDate) {
+  const result = await pool.query(`
+    SELECT * FROM daily_stats
+    WHERE tenant_id = $1 AND date >= $2 AND date <= $3
+    ORDER BY date ASC
+  `, [tenantId, startDate, endDate]);
+  return result.rows;
+}
+
+async function getAnalyticsSummary(tenantId, days = 30) {
+  const result = await pool.query(`
+    SELECT
+      -- Messaggi
+      COALESCE(SUM(messages_sent), 0) as total_messages_sent,
+      COALESCE(SUM(messages_received), 0) as total_messages_received,
+      COALESCE(SUM(ai_responses), 0) as total_ai_responses,
+
+      -- Clienti
+      COALESCE(SUM(new_clients), 0) as total_new_clients,
+      COALESCE(AVG(active_clients), 0)::INTEGER as avg_daily_active_clients,
+
+      -- Check-in
+      COALESCE(SUM(checkins), 0) as total_checkins,
+      COALESCE(AVG(checkins), 0)::DECIMAL(10,2) as avg_daily_checkins,
+
+      -- Automazioni
+      COALESCE(SUM(automation_messages_sent), 0) as total_automation_messages,
+      COALESCE(SUM(automation_conversions), 0) as total_automation_conversions,
+
+      -- Periodo
+      COUNT(*) as days_with_data
+    FROM daily_stats
+    WHERE tenant_id = $1 AND date > NOW() - INTERVAL '1 day' * $2
+  `, [tenantId, days]);
+  return result.rows[0];
+}
+
+async function updateDailyStats(tenantId, field, increment = 1) {
+  const today = new Date().toISOString().split('T')[0];
+
+  await pool.query(`
+    INSERT INTO daily_stats (tenant_id, date, ${field})
+    VALUES ($1, $2, $3)
+    ON CONFLICT (tenant_id, date) DO UPDATE SET
+      ${field} = daily_stats.${field} + $3,
+      updated_at = NOW()
+  `, [tenantId, today, increment]);
+}
+
+async function getAnalyticsTimeline(tenantId, days = 30) {
+  const result = await pool.query(`
+    SELECT
+      date,
+      messages_sent,
+      messages_received,
+      checkins,
+      new_clients,
+      active_clients,
+      automation_messages_sent
+    FROM daily_stats
+    WHERE tenant_id = $1 AND date > NOW() - INTERVAL '1 day' * $2
+    ORDER BY date ASC
+  `, [tenantId, days]);
+  return result.rows;
+}
+
+async function trackAnalyticsEvent(tenantId, eventType, eventName, clientId = null, eventData = {}) {
+  const result = await pool.query(`
+    INSERT INTO analytics_events (tenant_id, client_id, event_type, event_name, event_data)
+    VALUES ($1, $2, $3, $4, $5)
+    RETURNING *
+  `, [tenantId, clientId, eventType, eventName, JSON.stringify(eventData)]);
+  return result.rows[0];
+}
+
+async function getAnalyticsEvents(tenantId, eventType = null, limit = 100) {
+  let query = `
+    SELECT ae.*, c.name as client_name, c.phone as client_phone
+    FROM analytics_events ae
+    LEFT JOIN clients c ON ae.client_id = c.id
+    WHERE ae.tenant_id = $1
+  `;
+  const params = [tenantId];
+
+  if (eventType) {
+    query += ` AND ae.event_type = $2`;
+    params.push(eventType);
+  }
+
+  query += ` ORDER BY ae.created_at DESC LIMIT $${params.length + 1}`;
+  params.push(limit);
+
+  const result = await pool.query(query, params);
+  return result.rows;
+}
+
+async function getGlobalAnalytics() {
+  const result = await pool.query(`
+    SELECT
+      t.id as tenant_id,
+      t.name as tenant_name,
+      t.slug,
+      t.whatsapp_connected,
+      t.subscription_status,
+
+      -- Stats correnti
+      (SELECT COUNT(*) FROM clients WHERE tenant_id = t.id) as total_clients,
+      (SELECT COUNT(*) FROM messages WHERE tenant_id = t.id) as total_messages,
+      (SELECT COUNT(*) FROM checkins WHERE tenant_id = t.id) as total_checkins,
+
+      -- Stats ultimi 7 giorni
+      (SELECT COALESCE(SUM(messages_sent + messages_received), 0) FROM daily_stats WHERE tenant_id = t.id AND date > NOW() - INTERVAL '7 days') as messages_7d,
+      (SELECT COALESCE(SUM(checkins), 0) FROM daily_stats WHERE tenant_id = t.id AND date > NOW() - INTERVAL '7 days') as checkins_7d,
+      (SELECT COALESCE(SUM(new_clients), 0) FROM daily_stats WHERE tenant_id = t.id AND date > NOW() - INTERVAL '7 days') as new_clients_7d,
+
+      -- Ultima attività
+      (SELECT MAX(created_at) FROM messages WHERE tenant_id = t.id) as last_message_at
+    FROM tenants t
+    WHERE t.subscription_status = 'active' OR t.subscription_status IS NULL
+    ORDER BY total_messages DESC
+  `);
+  return result.rows;
+}
+
+async function calculateAndStoreDailyStats(tenantId, date) {
+  // Calcola stats per una data specifica basandosi sui dati grezzi
+  const dateStr = date.toISOString().split('T')[0];
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + 1);
+
+  const stats = await pool.query(`
+    SELECT
+      (SELECT COUNT(*) FROM messages WHERE tenant_id = $1 AND direction = 'outgoing' AND created_at >= $2 AND created_at < $3) as messages_sent,
+      (SELECT COUNT(*) FROM messages WHERE tenant_id = $1 AND direction = 'incoming' AND created_at >= $2 AND created_at < $3) as messages_received,
+      (SELECT COUNT(*) FROM messages WHERE tenant_id = $1 AND is_ai_response = true AND created_at >= $2 AND created_at < $3) as ai_responses,
+      (SELECT COUNT(*) FROM clients WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3) as new_clients,
+      (SELECT COUNT(DISTINCT phone) FROM messages WHERE tenant_id = $1 AND created_at >= $2 AND created_at < $3) as active_clients,
+      (SELECT COUNT(*) FROM checkins WHERE tenant_id = $1 AND checked_in_at >= $2 AND checked_in_at < $3) as checkins,
+      (SELECT COUNT(DISTINCT phone) FROM checkins WHERE tenant_id = $1 AND checked_in_at >= $2 AND checked_in_at < $3) as unique_checkins,
+      (SELECT COUNT(*) FROM automation_jobs WHERE tenant_id = $1 AND executed_at >= $2 AND executed_at < $3 AND status = 'sent') as automation_messages_sent
+  `, [tenantId, dateStr, nextDate.toISOString().split('T')[0]]);
+
+  const s = stats.rows[0];
+
+  await pool.query(`
+    INSERT INTO daily_stats (
+      tenant_id, date, messages_sent, messages_received, ai_responses,
+      new_clients, active_clients, checkins, unique_checkins, automation_messages_sent
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    ON CONFLICT (tenant_id, date) DO UPDATE SET
+      messages_sent = $3,
+      messages_received = $4,
+      ai_responses = $5,
+      new_clients = $6,
+      active_clients = $7,
+      checkins = $8,
+      unique_checkins = $9,
+      automation_messages_sent = $10,
+      updated_at = NOW()
+  `, [
+    tenantId, dateStr,
+    parseInt(s.messages_sent) || 0,
+    parseInt(s.messages_received) || 0,
+    parseInt(s.ai_responses) || 0,
+    parseInt(s.new_clients) || 0,
+    parseInt(s.active_clients) || 0,
+    parseInt(s.checkins) || 0,
+    parseInt(s.unique_checkins) || 0,
+    parseInt(s.automation_messages_sent) || 0
+  ]);
+}
+
+async function backfillAnalytics(tenantId, daysBack = 30) {
+  const results = [];
+  for (let i = daysBack; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    await calculateAndStoreDailyStats(tenantId, date);
+    results.push(date.toISOString().split('T')[0]);
+  }
+  return results;
+}
+
 // ========== EXPORTS ==========
 
 module.exports = {
@@ -1301,5 +1487,16 @@ module.exports = {
   updateOnboardingProgress,
   completeOnboarding,
   updateTenantOnboardingData,
-  expireOldOnboardingTokens
+  expireOldOnboardingTokens,
+
+  // Analytics
+  getDailyStats,
+  getAnalyticsSummary,
+  updateDailyStats,
+  getAnalyticsTimeline,
+  trackAnalyticsEvent,
+  getAnalyticsEvents,
+  getGlobalAnalytics,
+  calculateAndStoreDailyStats,
+  backfillAnalytics
 };
