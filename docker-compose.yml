@@ -87,6 +87,9 @@ services:
       - AI_MODEL=claude-sonnet-4-20250514
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - APP_BASE_URL=https://f858-93-150-243-154.ngrok-free.app
+      # Telegram Monitoring (opzionale)
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
     volumes:
       - ./backend:/app
       - /app/node_modules
