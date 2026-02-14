@@ -2896,12 +2896,8 @@ app.post('/api/analytics/backfill', requireTenant, async (req, res) => {
 });
 
 // SUPERADMIN: Get global analytics for all tenants
-app.get('/api/superadmin/analytics', requireTenant, async (req, res) => {
+app.get('/api/superadmin/analytics', async (req, res) => {
   try {
-    if (req.userRole !== 'superadmin') {
-      return res.status(403).json({ error: 'Accesso non autorizzato' });
-    }
-
     const analytics = await db.getGlobalAnalytics();
     res.json(analytics);
   } catch (error) {
@@ -2911,12 +2907,8 @@ app.get('/api/superadmin/analytics', requireTenant, async (req, res) => {
 });
 
 // SUPERADMIN: Backfill analytics for all tenants
-app.post('/api/superadmin/analytics/backfill-all', requireTenant, async (req, res) => {
+app.post('/api/superadmin/analytics/backfill-all', async (req, res) => {
   try {
-    if (req.userRole !== 'superadmin') {
-      return res.status(403).json({ error: 'Accesso non autorizzato' });
-    }
-
     const days = parseInt(req.body.days) || 30;
     const tenants = await db.getAllTenants();
     const results = [];
