@@ -2833,7 +2833,7 @@ app.post('/api/onboarding/:token/complete', async (req, res) => {
 // ========== ANALYTICS ==========
 
 // Get analytics summary for tenant
-app.get('/api/analytics/summary', authMiddleware, async (req, res) => {
+app.get('/api/analytics/summary', requireTenant, async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 30;
     const summary = await db.getAnalyticsSummary(req.tenantId, days);
@@ -2845,7 +2845,7 @@ app.get('/api/analytics/summary', authMiddleware, async (req, res) => {
 });
 
 // Get analytics timeline (for charts)
-app.get('/api/analytics/timeline', authMiddleware, async (req, res) => {
+app.get('/api/analytics/timeline', requireTenant, async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 30;
     const timeline = await db.getAnalyticsTimeline(req.tenantId, days);
@@ -2857,7 +2857,7 @@ app.get('/api/analytics/timeline', authMiddleware, async (req, res) => {
 });
 
 // Get daily stats for a date range
-app.get('/api/analytics/daily', authMiddleware, async (req, res) => {
+app.get('/api/analytics/daily', requireTenant, async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const end = endDate || new Date().toISOString().split('T')[0];
@@ -2872,7 +2872,7 @@ app.get('/api/analytics/daily', authMiddleware, async (req, res) => {
 });
 
 // Get analytics events
-app.get('/api/analytics/events', authMiddleware, async (req, res) => {
+app.get('/api/analytics/events', requireTenant, async (req, res) => {
   try {
     const { type, limit } = req.query;
     const events = await db.getAnalyticsEvents(req.tenantId, type, parseInt(limit) || 100);
@@ -2884,7 +2884,7 @@ app.get('/api/analytics/events', authMiddleware, async (req, res) => {
 });
 
 // Backfill analytics data (manual trigger)
-app.post('/api/analytics/backfill', authMiddleware, async (req, res) => {
+app.post('/api/analytics/backfill', requireTenant, async (req, res) => {
   try {
     const days = parseInt(req.body.days) || 30;
     const results = await db.backfillAnalytics(req.tenantId, days);
@@ -2896,7 +2896,7 @@ app.post('/api/analytics/backfill', authMiddleware, async (req, res) => {
 });
 
 // SUPERADMIN: Get global analytics for all tenants
-app.get('/api/superadmin/analytics', authMiddleware, async (req, res) => {
+app.get('/api/superadmin/analytics', requireTenant, async (req, res) => {
   try {
     if (req.userRole !== 'superadmin') {
       return res.status(403).json({ error: 'Accesso non autorizzato' });
@@ -2911,7 +2911,7 @@ app.get('/api/superadmin/analytics', authMiddleware, async (req, res) => {
 });
 
 // SUPERADMIN: Backfill analytics for all tenants
-app.post('/api/superadmin/analytics/backfill-all', authMiddleware, async (req, res) => {
+app.post('/api/superadmin/analytics/backfill-all', requireTenant, async (req, res) => {
   try {
     if (req.userRole !== 'superadmin') {
       return res.status(403).json({ error: 'Accesso non autorizzato' });
