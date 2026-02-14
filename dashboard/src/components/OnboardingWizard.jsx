@@ -410,6 +410,15 @@ function OnboardingWizard() {
                     {checkingWhatsApp && <Loader2 className="w-4 h-4 animate-spin" />}
                     <span className="text-sm">In attesa della connessione...</span>
                   </div>
+
+                  <div className="mt-6 pt-4 border-t border-gray-200">
+                    <button
+                      onClick={() => setCurrentStep(3)}
+                      className="text-sm text-gray-500 hover:text-gray-700 underline"
+                    >
+                      Salta questo passaggio (configurerai WhatsApp dopo)
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
