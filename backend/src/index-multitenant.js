@@ -2803,7 +2803,7 @@ app.post('/api/onboarding/:token/complete', async (req, res) => {
     const monitoring = req.app.locals.monitoring;
     if (monitoring) {
       const tenant = await db.getTenant(onboarding.tenant_id);
-      await monitoring.sendTelegramAlert(
+      await monitoring.sendAlert(
         `✅ Nuova palestra configurata!`,
         `La palestra "${tenant.name}" ha completato l'onboarding ed è pronta per l'uso.`,
         'info'
