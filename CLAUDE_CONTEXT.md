@@ -14,6 +14,7 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - **Hosting**: Coolify su server Hetzner (46.225.16.97)
 - **Dominio**: https://coachpalestra.it/
 - **Marketing Automation**: node-cron scheduler per messaggi automatici
+- **Monitoring**: Sistema di monitoraggio 24/7 con alert Telegram
 
 ### Container Docker in Produzione
 ```
@@ -46,6 +47,12 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - **API Key**: [vedi .env - GROQ_API_KEY]
 - **Model**: llama-3.3-70b-versatile
 
+### Telegram Bot (Monitoring Alerts)
+- **Bot**: @daniel0805bot
+- **Token**: [vedi .env - TELEGRAM_BOT_TOKEN]
+- **Chat ID**: 1483894435
+- **Uso**: Riceve alert automatici quando servizi vanno offline
+
 ## File Principali
 
 ### Backend
@@ -59,6 +66,8 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - `/backend/src/automation/templates.js` - Template messaggi con variabili
 - `/backend/src/routes/auth.js` - Autenticazione JWT
 - `/backend/src/middleware/auth.js` - Middleware tenant
+- `/backend/src/monitoring/index.js` - Sistema monitoring 24/7 con alert Telegram
+- `/backend/db/migrations/005-monitoring.sql` - Schema tabelle monitoring
 - `/backend/Dockerfile.prod` - Docker per produzione
 
 ### Dashboard
@@ -106,10 +115,19 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - **Password**: CoachAI2024!
 - Gestione multi-tenant (crea/modifica/elimina palestre)
 - **Gestione Abbonamenti**: piano, stato, scadenza, prezzo, note
+- **Tab Monitoring**: stato servizi, alert history, test Telegram
 - Impersonation (accedi come una palestra)
 - Statistiche globali (tenant totali, clienti, messaggi)
 - Badge stato abbonamento (attivo, in scadenza, sospeso)
 - Azioni rapide (+1 mese, +1 anno, attiva pro, sospendi)
+
+### Sistema Monitoring 24/7
+- **Health Check ogni 5 minuti**: Database, Evolution API, WhatsApp per ogni tenant
+- **Alert Telegram**: notifica immediata quando un servizio va offline
+- **Report Giornaliero**: alle 9:00 invia riepilogo stato sistema
+- **Alert Abbonamenti**: alle 10:00 notifica abbonamenti in scadenza (7 giorni)
+- **Anti-duplicati**: cooldown 30 minuti tra alert identici
+- **Dashboard**: tab dedicato in SuperAdmin per vedere stato e alert
 
 ## API Endpoints Principali
 
@@ -140,6 +158,13 @@ POST   /api/superadmin/tenants - Crea nuova palestra
 PUT    /api/superadmin/tenants/:id - Modifica palestra (incluso abbonamento)
 DELETE /api/superadmin/tenants/:id - Elimina palestra
 GET    /api/superadmin/tenants/:id - Dettagli singola palestra
+
+# MONITORING ENDPOINTS
+GET  /api/monitoring/health - Health check completo (DB, Evolution, WhatsApp)
+GET  /api/monitoring/stats - Statistiche alert (totali, non letti)
+GET  /api/monitoring/alerts - Storico alert con paginazione
+POST /api/monitoring/alerts/:id/acknowledge - Segna alert come letto
+POST /api/monitoring/test-telegram - Invia messaggio test a Telegram
 ```
 
 ## Comandi Utili
@@ -173,6 +198,16 @@ docker logs evolution-api-z80wkw4o800cs4s408cccwwg --tail 50
 docker logs backend-z80wkw4o800cs4s408cccwwg --tail 100 | grep -i "automation\|inactivity\|followup\|milestone"
 ```
 
+### Vedere log monitoring
+```bash
+docker logs backend-z80wkw4o800cs4s408cccwwg --tail 100 | grep -i "monitoring\|health\|alert"
+```
+
+### Test alert Telegram
+```bash
+curl -X POST https://coachpalestra.it/api/monitoring/test-telegram
+```
+
 ### Testare invio messaggio WhatsApp
 ```bash
 echo '{"number": "NUMERO", "text": "Messaggio"}' | curl -s -X POST \
@@ -201,6 +236,12 @@ SELECT phone, trigger_type, status, executed_at FROM automation_jobs ORDER BY ex
 
 -- Clienti inattivi da 3+ giorni
 SELECT phone, name, last_activity FROM clients WHERE last_activity < NOW() - INTERVAL '3 days';
+
+-- Vedere alert monitoring
+SELECT title, severity, created_at, acknowledged FROM monitoring_alerts ORDER BY created_at DESC LIMIT 10;
+
+-- Health check logs
+SELECT check_type, status, created_at FROM monitoring_health_logs ORDER BY created_at DESC LIMIT 10;
 ```
 
 ## Tabelle Database per Automation
@@ -272,6 +313,8 @@ Ogni tenant ha 7 sequenze pre-configurate:
 - [ ] Analytics avanzati
 - [x] ~~Automazioni marketing~~ COMPLETATO!
 - [x] ~~Gestione abbonamenti~~ COMPLETATO!
+- [x] ~~Sistema Monitoring 24/7~~ COMPLETATO! (Alert Telegram)
+- [ ] Agenti AI per marketing/analisi (OpenClaw/CrewAI)
 - [ ] Upsell sequences avanzate
 - [ ] A/B testing messaggi
 - [ ] Onboarding guidato per nuove palestre
@@ -284,6 +327,30 @@ subscription_status VARCHAR(50)    -- 'active', 'suspended', 'cancelled'
 subscription_ends_at TIMESTAMP     -- data scadenza
 subscription_price DECIMAL(10,2)   -- prezzo mensile in EUR
 subscription_notes TEXT            -- note su contratto/pagamento
+```
+
+## Tabelle Database per Monitoring
+
+```sql
+-- Storico alert inviati
+monitoring_alerts:
+  - id SERIAL
+  - title VARCHAR(200)
+  - message TEXT
+  - severity VARCHAR(20)         -- 'info', 'warning', 'error'
+  - acknowledged BOOLEAN
+  - acknowledged_at TIMESTAMP
+  - acknowledged_by VARCHAR(100)
+  - created_at TIMESTAMP
+
+-- Log health checks
+monitoring_health_logs:
+  - id SERIAL
+  - check_type VARCHAR(50)       -- 'database', 'evolution_api', 'whatsapp', 'full'
+  - status VARCHAR(20)           -- 'healthy', 'unhealthy', 'degraded'
+  - details JSONB
+  - response_time_ms INTEGER
+  - created_at TIMESTAMP
 ```
 
 ---

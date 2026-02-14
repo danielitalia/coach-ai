@@ -2798,16 +2798,26 @@ app.post('/api/onboarding/:token/complete', async (req, res) => {
 
     // Complete the onboarding
     await db.completeOnboarding(token);
+    console.log('Onboarding completato per token:', token);
 
     // Send Telegram notification
     const monitoring = req.app.locals.monitoring;
+    console.log('Monitoring object disponibile:', !!monitoring);
     if (monitoring) {
-      const tenant = await db.getTenant(onboarding.tenant_id);
-      await monitoring.sendAlert(
-        `✅ Nuova palestra configurata!`,
-        `La palestra "${tenant.name}" ha completato l'onboarding ed è pronta per l'uso.`,
-        'info'
-      );
+      try {
+        const tenant = await db.getTenant(onboarding.tenant_id);
+        console.log('Invio notifica Telegram per tenant:', tenant?.name);
+        await monitoring.sendAlert(
+          `✅ Nuova palestra configurata!`,
+          `La palestra "${tenant.name}" ha completato l'onboarding ed è pronta per l'uso.`,
+          'info'
+        );
+        console.log('Notifica Telegram inviata con successo');
+      } catch (telegramError) {
+        console.error('Errore invio notifica Telegram:', telegramError);
+      }
+    } else {
+      console.log('ATTENZIONE: Monitoring non disponibile - notifica non inviata');
     }
 
     res.json({

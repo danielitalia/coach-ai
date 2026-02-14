@@ -37,3 +37,4 @@ backend/workouts/*.pdf
 tmp/
 temp/
 *.tmp
+CLAUDE_CONTEXT.md
