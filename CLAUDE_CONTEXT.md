@@ -10,11 +10,12 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - **Database**: PostgreSQL (multi-tenant)
 - **WhatsApp**: Evolution API v2.3.7 (evoapicloud/evolution-api:latest)
 - **AI**: Groq API (llama-3.3-70b-versatile) - configurabile anche per OpenAI/Anthropic
-- **Dashboard**: React + Vite + TailwindCSS
+- **Dashboard**: React + Vite + TailwindCSS + Recharts
 - **Hosting**: Coolify su server Hetzner (46.225.16.97)
 - **Dominio**: https://coachpalestra.it/
 - **Marketing Automation**: node-cron scheduler per messaggi automatici
 - **Monitoring**: Sistema di monitoraggio 24/7 con alert Telegram
+- **Analytics**: Sistema di metriche e grafici con dati storici
 
 ### Container Docker in Produzione
 ```
@@ -57,8 +58,11 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 
 ### Backend
 - `/backend/src/index-multitenant.js` - Entry point principale con tutte le API
-- `/backend/db/database-multitenant.js` - Funzioni database (CRUD + Automation)
+- `/backend/db/database-multitenant.js` - Funzioni database (CRUD + Automation + Analytics)
 - `/backend/db/migrations/003-automation.sql` - Schema tabelle automation
+- `/backend/db/migrations/005-monitoring.sql` - Schema tabelle monitoring
+- `/backend/db/migrations/006-onboarding.sql` - Schema tabelle onboarding
+- `/backend/db/migrations/007-analytics.sql` - Schema tabelle analytics
 - `/backend/src/automation/index.js` - Scheduler marketing automation
 - `/backend/src/automation/handlers/inactivity.js` - Handler reminder inattività
 - `/backend/src/automation/handlers/followups.js` - Handler follow-up post-checkin
@@ -67,13 +71,14 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - `/backend/src/routes/auth.js` - Autenticazione JWT
 - `/backend/src/middleware/auth.js` - Middleware tenant
 - `/backend/src/monitoring/index.js` - Sistema monitoring 24/7 con alert Telegram
-- `/backend/db/migrations/005-monitoring.sql` - Schema tabelle monitoring
 - `/backend/Dockerfile.prod` - Docker per produzione
 
 ### Dashboard
 - `/dashboard/src/App.jsx` - Router principale
+- `/dashboard/src/components/Analytics.jsx` - Dashboard analytics con grafici Recharts
 - `/dashboard/src/components/Automations.jsx` - Gestione marketing automation
-- `/dashboard/src/components/SuperAdmin.jsx` - Gestione palestre e abbonamenti (/superadmin)
+- `/dashboard/src/components/SuperAdmin.jsx` - Gestione palestre, monitoring e analytics globali
+- `/dashboard/src/components/OnboardingWizard.jsx` - Wizard 4 step per nuove palestre
 - `/dashboard/src/components/WorkoutPlans.jsx` - Gestione schede
 - `/dashboard/src/components/ClientList.jsx` - Lista clienti
 - `/dashboard/nginx.conf` - Configurazione Nginx
@@ -92,7 +97,7 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - Sistema referral con codici
 - Sistema premi/rewards
 
-### Marketing Automation (NUOVO!)
+### Marketing Automation
 - **Reminder Inattività**: messaggi automatici dopo 3, 7, 14 giorni senza check-in
 - **Follow-up Post-Checkin**: messaggio motivazionale 1h dopo check-in
 - **Milestone Streak**: celebrazione per 5, 10, 20 giorni consecutivi
@@ -106,8 +111,8 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - Visualizzazione clienti e conversazioni
 - **Gestione Schede**: modifica visuale delle schede di allenamento
 - **Automazioni**: gestione sequenze marketing, storico invii, statistiche
+- **Analytics**: grafici messaggi, check-in, clienti, automazioni
 - Invio messaggi manuali ai clienti
-- Statistiche e analytics
 - QR code per check-in
 - Connessione WhatsApp con QR code
 
@@ -116,6 +121,8 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - Gestione multi-tenant (crea/modifica/elimina palestre)
 - **Gestione Abbonamenti**: piano, stato, scadenza, prezzo, note
 - **Tab Monitoring**: stato servizi, alert history, test Telegram
+- **Tab Analytics**: vista globale metriche tutte le palestre
+- **Onboarding Links**: genera link per auto-configurazione nuove palestre
 - Impersonation (accedi come una palestra)
 - Statistiche globali (tenant totali, clienti, messaggi)
 - Badge stato abbonamento (attivo, in scadenza, sospeso)
@@ -128,6 +135,30 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - **Alert Abbonamenti**: alle 10:00 notifica abbonamenti in scadenza (7 giorni)
 - **Anti-duplicati**: cooldown 30 minuti tra alert identici
 - **Dashboard**: tab dedicato in SuperAdmin per vedere stato e alert
+
+### Onboarding Guidato (NUOVO!)
+- **Wizard 4 Step**: Info Palestra → WhatsApp → Coach AI → Conferma
+- **Link univoci**: generabili da SuperAdmin per ogni tenant
+- **Token con scadenza**: 7 giorni di validità
+- **Skip WhatsApp**: possibilità di saltare configurazione WhatsApp
+- **Notifica Telegram**: alert quando nuova palestra completa onboarding
+- **Salvataggio progressi**: dati salvati ad ogni step
+
+### Analytics Avanzati (NUOVO!)
+- **Dashboard per tenant**:
+  - 4 KPI cards: Messaggi, Check-in, Nuovi Clienti, Automazioni
+  - Grafico Area: Messaggi inviati/ricevuti nel tempo
+  - Grafico Barre: Check-in giornalieri
+  - Grafico Linee: Clienti attivi e nuovi
+  - Grafico Area: Performance automazioni
+  - Selettore periodo (7/14/30/90 giorni)
+  - Pulsante "Ricalcola" per rigenerare stats storiche
+- **SuperAdmin Analytics**:
+  - Tabella tutte le palestre con metriche
+  - Stato WhatsApp, clienti totali, messaggi, check-in
+  - Dati ultimi 7 giorni con evidenziazione
+  - Totali aggregati in footer
+  - Pulsante "Ricalcola Tutte" per backfill globale
 
 ## API Endpoints Principali
 
@@ -152,12 +183,23 @@ POST /api/automations/run - Trigger manuale automazioni
 PUT  /api/automations/:id - Modifica sequenza (messaggio template)
 POST /api/automations/:id/toggle - Abilita/disabilita sequenza
 
+# ANALYTICS ENDPOINTS
+GET  /api/analytics/summary - Riepilogo metriche per periodo
+GET  /api/analytics/timeline - Dati per grafici temporali
+GET  /api/analytics/daily - Stats giornaliere dettagliate
+GET  /api/analytics/events - Eventi analytics
+POST /api/analytics/backfill - Ricalcola statistiche storiche
+
 # SUPERADMIN ENDPOINTS
 GET    /api/superadmin/tenants - Lista palestre con stats
 POST   /api/superadmin/tenants - Crea nuova palestra
 PUT    /api/superadmin/tenants/:id - Modifica palestra (incluso abbonamento)
 DELETE /api/superadmin/tenants/:id - Elimina palestra
 GET    /api/superadmin/tenants/:id - Dettagli singola palestra
+POST   /api/superadmin/tenants/:id/onboarding - Genera link onboarding
+GET    /api/superadmin/tenants/:id/onboarding - Stato onboarding
+GET    /api/superadmin/analytics - Analytics globali tutte le palestre
+POST   /api/superadmin/analytics/backfill-all - Backfill per tutti i tenant
 
 # MONITORING ENDPOINTS
 GET  /api/monitoring/health - Health check completo (DB, Evolution, WhatsApp)
@@ -165,6 +207,13 @@ GET  /api/monitoring/stats - Statistiche alert (totali, non letti)
 GET  /api/monitoring/alerts - Storico alert con paginazione
 POST /api/monitoring/alerts/:id/acknowledge - Segna alert come letto
 POST /api/monitoring/test-telegram - Invia messaggio test a Telegram
+
+# ONBOARDING ENDPOINTS (pubblici)
+GET  /api/onboarding/:token - Info onboarding da token
+POST /api/onboarding/:token/step/:step - Salva dati step
+GET  /api/onboarding/:token/whatsapp/qrcode - QR code WhatsApp
+GET  /api/onboarding/:token/whatsapp/status - Stato connessione WhatsApp
+POST /api/onboarding/:token/complete - Completa onboarding
 ```
 
 ## Comandi Utili
@@ -177,14 +226,13 @@ ssh root@46.225.16.97
 
 ### Aggiornare il codice in produzione
 ```bash
-# Sul server
-cd /opt/coach-ai && git pull origin main
+# Metodo 1: Copiare file singoli
+scp backend/src/index-multitenant.js root@46.225.16.97:/tmp/
+ssh root@46.225.16.97 'docker cp /tmp/index-multitenant.js backend-z80wkw4o800cs4s408cccwwg:/app/src/'
+ssh root@46.225.16.97 'docker restart backend-z80wkw4o800cs4s408cccwwg'
 
-# Riavviare backend
-docker restart backend-z80wkw4o800cs4s408cccwwg
-
-# Riavviare dashboard (se modificata)
-docker restart dashboard-z80wkw4o800cs4s408cccwwg
+# Metodo 2: Rebuild dashboard
+ssh root@46.225.16.97 'docker exec dashboard-z80wkw4o800cs4s408cccwwg sh -c "cd /app && npm run build"'
 ```
 
 ### Vedere i log
@@ -242,12 +290,18 @@ SELECT title, severity, created_at, acknowledged FROM monitoring_alerts ORDER BY
 
 -- Health check logs
 SELECT check_type, status, created_at FROM monitoring_health_logs ORDER BY created_at DESC LIMIT 10;
+
+-- Analytics giornalieri
+SELECT date, messages_sent, checkins, new_clients FROM daily_stats WHERE tenant_id = 'UUID' ORDER BY date DESC LIMIT 10;
+
+-- Onboarding tokens
+SELECT token, status, current_step, expires_at FROM onboarding_tokens ORDER BY created_at DESC LIMIT 5;
 ```
 
-## Tabelle Database per Automation
+## Tabelle Database
 
+### Automation
 ```sql
--- Sequenze configurabili per tenant
 automation_sequences:
   - id UUID
   - tenant_id UUID
@@ -257,7 +311,6 @@ automation_sequences:
   - message_template TEXT
   - is_enabled BOOLEAN
 
--- Log job eseguiti
 automation_jobs:
   - id UUID
   - tenant_id UUID
@@ -271,6 +324,69 @@ automation_jobs:
   - executed_at TIMESTAMP
 ```
 
+### Monitoring
+```sql
+monitoring_alerts:
+  - id SERIAL
+  - title VARCHAR(200)
+  - message TEXT
+  - severity VARCHAR(20)         -- 'info', 'warning', 'error'
+  - acknowledged BOOLEAN
+  - acknowledged_at TIMESTAMP
+  - acknowledged_by VARCHAR(100)
+  - created_at TIMESTAMP
+
+monitoring_health_logs:
+  - id SERIAL
+  - check_type VARCHAR(50)       -- 'database', 'evolution_api', 'whatsapp', 'full'
+  - status VARCHAR(20)           -- 'healthy', 'unhealthy', 'degraded'
+  - details JSONB
+  - response_time_ms INTEGER
+  - created_at TIMESTAMP
+```
+
+### Onboarding
+```sql
+onboarding_tokens:
+  - id SERIAL
+  - tenant_id UUID
+  - token VARCHAR(64) UNIQUE
+  - status VARCHAR(20)          -- 'pending', 'in_progress', 'completed', 'expired'
+  - current_step INTEGER        -- 1-4
+  - step_data JSONB             -- dati salvati per ogni step
+  - expires_at TIMESTAMP
+  - started_at TIMESTAMP
+  - completed_at TIMESTAMP
+  - created_at TIMESTAMP
+```
+
+### Analytics
+```sql
+daily_stats:
+  - id SERIAL
+  - tenant_id UUID
+  - date DATE
+  - messages_sent INTEGER
+  - messages_received INTEGER
+  - ai_responses INTEGER
+  - new_clients INTEGER
+  - active_clients INTEGER
+  - checkins INTEGER
+  - unique_checkins INTEGER
+  - automation_messages_sent INTEGER
+  - automation_conversions INTEGER
+  - UNIQUE(tenant_id, date)
+
+analytics_events:
+  - id SERIAL
+  - tenant_id UUID
+  - client_id INTEGER
+  - event_type VARCHAR(50)
+  - event_name VARCHAR(100)
+  - event_data JSONB
+  - created_at TIMESTAMP
+```
+
 ## Problemi Risolti
 
 1. **npm ci fallisce**: Usare `npm install --omit=dev` nel Dockerfile
@@ -279,6 +395,8 @@ automation_jobs:
 4. **Backend non trova Evolution API**: Usare il nome completo del container (evolution-api-z80wkw4o800cs4s408cccwwg)
 5. **Tenant usa istanza sbagliata**: Aggiornare colonna `whatsapp_instance_name` nella tabella `tenants`
 6. **Route /api/automations/stats 404**: Mettere route specifiche PRIMA di route con `:id`
+7. **Notifica Telegram non inviata**: Usare `monitoring.sendAlert()` invece di `sendTelegramAlert()`
+8. **Analytics 401**: Gli endpoint superadmin devono essere pubblici (senza requireTenant)
 
 ## Tenant Configurati
 
@@ -310,14 +428,14 @@ Ogni tenant ha 7 sequenze pre-configurate:
 - [x] ~~Integrazione pagamenti~~ Gestione manuale implementata!
 - [ ] App mobile
 - [ ] Multi-lingua
-- [ ] Analytics avanzati
+- [x] ~~Analytics avanzati~~ COMPLETATO! (Grafici Recharts + SuperAdmin)
 - [x] ~~Automazioni marketing~~ COMPLETATO!
 - [x] ~~Gestione abbonamenti~~ COMPLETATO!
 - [x] ~~Sistema Monitoring 24/7~~ COMPLETATO! (Alert Telegram)
+- [x] ~~Onboarding guidato~~ COMPLETATO! (Wizard 4 step + notifica Telegram)
 - [ ] Agenti AI per marketing/analisi (OpenClaw/CrewAI)
 - [ ] Upsell sequences avanzate
 - [ ] A/B testing messaggi
-- [ ] Onboarding guidato per nuove palestre
 
 ## Campi Database Abbonamento (tenants)
 
@@ -329,29 +447,18 @@ subscription_price DECIMAL(10,2)   -- prezzo mensile in EUR
 subscription_notes TEXT            -- note su contratto/pagamento
 ```
 
-## Tabelle Database per Monitoring
+## Campi Database Onboarding (tenants)
 
 ```sql
--- Storico alert inviati
-monitoring_alerts:
-  - id SERIAL
-  - title VARCHAR(200)
-  - message TEXT
-  - severity VARCHAR(20)         -- 'info', 'warning', 'error'
-  - acknowledged BOOLEAN
-  - acknowledged_at TIMESTAMP
-  - acknowledged_by VARCHAR(100)
-  - created_at TIMESTAMP
-
--- Log health checks
-monitoring_health_logs:
-  - id SERIAL
-  - check_type VARCHAR(50)       -- 'database', 'evolution_api', 'whatsapp', 'full'
-  - status VARCHAR(20)           -- 'healthy', 'unhealthy', 'degraded'
-  - details JSONB
-  - response_time_ms INTEGER
-  - created_at TIMESTAMP
+onboarding_completed BOOLEAN       -- true se wizard completato
+coach_name VARCHAR(100)            -- nome del coach virtuale
+coach_tone VARCHAR(50)             -- 'formal', 'friendly', 'motivational'
+welcome_message TEXT               -- messaggio benvenuto personalizzato
+gym_address TEXT                   -- indirizzo palestra
+gym_phone VARCHAR(50)              -- telefono palestra
+gym_hours TEXT                     -- orari apertura
+logo_url TEXT                      -- URL logo palestra
 ```
 
 ---
-*Ultimo aggiornamento: 13 Febbraio 2026*
+*Ultimo aggiornamento: 15 Febbraio 2026*
