@@ -21,6 +21,9 @@ const automation = require('./automation');
 // Monitoring System
 const MonitoringSystem = require('./monitoring');
 
+// Backup System
+const BackupSystem = require('./backup');
+
 // Directory per salvare i PDF delle schede
 const WORKOUTS_DIR = path.join(__dirname, '../workouts');
 if (!fs.existsSync(WORKOUTS_DIR)) {
@@ -2929,6 +2932,85 @@ app.post('/api/superadmin/analytics/backfill-all', async (req, res) => {
   }
 });
 
+// ========== BACKUP ==========
+
+// SUPERADMIN: Get backup stats
+app.get('/api/superadmin/backups', async (req, res) => {
+  try {
+    const backup = req.app.locals.backup;
+    if (!backup) {
+      return res.status(503).json({ error: 'Backup system not initialized' });
+    }
+
+    const stats = backup.getStats();
+    const backups = backup.listBackups();
+
+    res.json({ stats, backups });
+  } catch (error) {
+    console.error('Errore get backups:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// SUPERADMIN: Trigger manual backup
+app.post('/api/superadmin/backups/run', async (req, res) => {
+  try {
+    const backup = req.app.locals.backup;
+    if (!backup) {
+      return res.status(503).json({ error: 'Backup system not initialized' });
+    }
+
+    const result = await backup.manualBackup();
+    res.json(result);
+  } catch (error) {
+    console.error('Errore manual backup:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// SUPERADMIN: Download a backup file
+app.get('/api/superadmin/backups/download/:filename', async (req, res) => {
+  try {
+    const backup = req.app.locals.backup;
+    if (!backup) {
+      return res.status(503).json({ error: 'Backup system not initialized' });
+    }
+
+    const { filename } = req.params;
+
+    // Security: validate filename to prevent path traversal
+    if (filename.includes('..') || filename.includes('/')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const filepath = backup.getBackupPath(filename);
+    if (!filepath) {
+      return res.status(404).json({ error: 'Backup not found' });
+    }
+
+    res.download(filepath, filename);
+  } catch (error) {
+    console.error('Errore download backup:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// SUPERADMIN: Clean old backups manually
+app.post('/api/superadmin/backups/clean', async (req, res) => {
+  try {
+    const backup = req.app.locals.backup;
+    if (!backup) {
+      return res.status(503).json({ error: 'Backup system not initialized' });
+    }
+
+    const result = await backup.cleanOldBackups();
+    res.json(result);
+  } catch (error) {
+    console.error('Errore clean backups:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== AVVIO SERVER ==========
 
 async function startServer() {
@@ -2975,11 +3057,25 @@ async function startServer() {
     // Expose monitoring for API endpoints
     app.locals.monitoring = monitoring;
 
+    // Initialize and start backup system
+    const backup = new BackupSystem({
+      dbUrl: process.env.DATABASE_URL,
+      backupDir: process.env.BACKUP_DIR || '/app/backups',
+      retentionDays: parseInt(process.env.BACKUP_RETENTION_DAYS) || 7,
+      telegramToken: process.env.TELEGRAM_BOT_TOKEN,
+      telegramChatId: process.env.TELEGRAM_CHAT_ID
+    });
+    backup.start();
+
+    // Expose backup for API endpoints
+    app.locals.backup = backup;
+
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log(`Coach AI Backend (Multi-Tenant) running on port ${PORT}`);
       console.log('Marketing Automation: ACTIVE');
       console.log('Monitoring System: ACTIVE');
+      console.log('Backup System: ACTIVE (daily at 03:00)');
     });
   } catch (error) {
     console.error('Errore avvio server:', error);

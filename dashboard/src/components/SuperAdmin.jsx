@@ -5,7 +5,7 @@ import {
   TrendingUp, Smartphone, Calendar, LogIn, ArrowLeft, CreditCard,
   AlertTriangle, CheckCircle, Clock, FileText, Bell, Wifi, WifiOff,
   Server, Database, Send, Shield, Link2, Copy, ExternalLink, BarChart3,
-  Loader2
+  Loader2, HardDrive, Download, Play
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
@@ -120,6 +120,12 @@ function SuperAdminDashboard({ onLogout }) {
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [backfillingAll, setBackfillingAll] = useState(false)
 
+  // Backup state
+  const [backupStats, setBackupStats] = useState(null)
+  const [backupList, setBackupList] = useState([])
+  const [backupLoading, setBackupLoading] = useState(false)
+  const [runningBackup, setRunningBackup] = useState(false)
+
   useEffect(() => {
     fetchData()
   }, [])
@@ -130,6 +136,9 @@ function SuperAdminDashboard({ onLogout }) {
     }
     if (activeTab === 'analytics') {
       fetchAnalyticsData()
+    }
+    if (activeTab === 'backups') {
+      fetchBackupData()
     }
   }, [activeTab])
 
@@ -241,6 +250,45 @@ function SuperAdminDashboard({ onLogout }) {
     setBackfillingAll(false)
   }
 
+  const fetchBackupData = async () => {
+    setBackupLoading(true)
+    try {
+      const res = await fetch('/api/superadmin/backups')
+      if (res.ok) {
+        const data = await res.json()
+        setBackupStats(data.stats)
+        setBackupList(data.backups || [])
+      }
+    } catch (err) {
+      console.error('Error fetching backups:', err)
+    }
+    setBackupLoading(false)
+  }
+
+  const runManualBackup = async () => {
+    if (!confirm('Eseguire un backup manuale del database?')) return
+
+    setRunningBackup(true)
+    try {
+      const res = await fetch('/api/superadmin/backups/run', { method: 'POST' })
+      const data = await res.json()
+
+      if (data.success) {
+        alert(`Backup completato!\nFile: ${data.filename}\nDimensione: ${(data.size / 1024 / 1024).toFixed(2)} MB`)
+        fetchBackupData()
+      } else {
+        throw new Error(data.error || 'Errore backup')
+      }
+    } catch (err) {
+      alert('Errore: ' + err.message)
+    }
+    setRunningBackup(false)
+  }
+
+  const downloadBackup = (filename) => {
+    window.open(`/api/superadmin/backups/download/${filename}`, '_blank')
+  }
+
   const handleDeleteTenant = async (tenantId) => {
     if (!window.confirm('Sei sicuro di voler eliminare questa palestra? Questa azione è irreversibile.')) {
       return
@@ -307,6 +355,15 @@ function SuperAdminDashboard({ onLogout }) {
               >
                 <BarChart3 className="w-4 h-4 inline mr-2" />
                 Analytics
+              </button>
+              <button
+                onClick={() => setActiveTab('backups')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'backups' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <HardDrive className="w-4 h-4 inline mr-2" />
+                Backup
               </button>
             </div>
             <button
@@ -731,6 +788,174 @@ function SuperAdminDashboard({ onLogout }) {
                   </div>
                 )}
               </div>
+            )}
+          </>
+        )}
+
+        {/* BACKUPS TAB */}
+        {activeTab === 'backups' && (
+          <>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-gray-900">Backup Database</h2>
+              <button
+                onClick={runManualBackup}
+                disabled={runningBackup}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-50"
+              >
+                {runningBackup ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4" />
+                )}
+                {runningBackup ? 'Backup in corso...' : 'Esegui Backup Ora'}
+              </button>
+            </div>
+
+            {backupLoading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+              </div>
+            ) : (
+              <>
+                {/* Backup Stats */}
+                {backupStats && (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-white rounded-xl p-6 border border-gray-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-500">Backup Totali</p>
+                          <p className="text-2xl font-bold text-gray-900">{backupStats.totalBackups}</p>
+                        </div>
+                        <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center">
+                          <HardDrive className="w-6 h-6 text-blue-600" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-white rounded-xl p-6 border border-gray-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-500">Spazio Utilizzato</p>
+                          <p className="text-2xl font-bold text-gray-900">{backupStats.totalSizeMB} MB</p>
+                        </div>
+                        <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center">
+                          <Database className="w-6 h-6 text-purple-600" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-white rounded-xl p-6 border border-gray-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-500">Retention</p>
+                          <p className="text-2xl font-bold text-gray-900">{backupStats.retentionDays} giorni</p>
+                        </div>
+                        <div className="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center">
+                          <Clock className="w-6 h-6 text-green-600" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-white rounded-xl p-6 border border-gray-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-500">Ultimo Backup</p>
+                          <p className="text-lg font-bold text-gray-900">
+                            {backupStats.newestBackup
+                              ? new Date(backupStats.newestBackup).toLocaleDateString('it-IT', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })
+                              : 'Mai'
+                            }
+                          </p>
+                        </div>
+                        <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center">
+                          <Calendar className="w-6 h-6 text-orange-600" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Backup List */}
+                <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-gray-200">
+                    <h3 className="font-semibold text-gray-900">Backup Disponibili</h3>
+                    <p className="text-sm text-gray-500 mt-1">I backup vengono eseguiti automaticamente ogni giorno alle 03:00</p>
+                  </div>
+
+                  {backupList.length === 0 ? (
+                    <div className="px-6 py-12 text-center text-gray-500">
+                      <HardDrive className="w-12 h-12 mx-auto text-gray-300 mb-4" />
+                      <p>Nessun backup disponibile</p>
+                      <p className="text-sm mt-1">Clicca "Esegui Backup Ora" per creare il primo backup</p>
+                    </div>
+                  ) : (
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200">
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">File</th>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Dimensione</th>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Data Creazione</th>
+                          <th className="px-6 py-3 text-left text-sm font-semibold text-gray-900">Età</th>
+                          <th className="px-6 py-3 text-right text-sm font-semibold text-gray-900">Azioni</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {backupList.map((backup, idx) => (
+                          <tr key={backup.filename} className="hover:bg-gray-50">
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <HardDrive className="w-5 h-5 text-gray-400" />
+                                <span className="font-mono text-sm text-gray-900">{backup.filename}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-gray-600">
+                              {backup.sizeMB} MB
+                            </td>
+                            <td className="px-6 py-4 text-gray-600">
+                              {new Date(backup.created).toLocaleString('it-IT', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                idx === 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {backup.age}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <button
+                                onClick={() => downloadBackup(backup.filename)}
+                                className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 text-sm ml-auto"
+                              >
+                                <Download className="w-4 h-4" />
+                                Download
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Info Box */}
+                <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-blue-800 mb-2">Informazioni sui Backup</h4>
+                  <ul className="text-sm text-blue-700 space-y-1">
+                    <li>I backup automatici vengono eseguiti ogni giorno alle 03:00</li>
+                    <li>I backup più vecchi di {backupStats?.retentionDays || 7} giorni vengono eliminati automaticamente</li>
+                    <li>Ricevi una notifica Telegram quando un backup viene completato o fallisce</li>
+                    <li>Per ripristinare un backup, scaricalo e usa pg_restore</li>
+                  </ul>
+                </div>
+              </>
             )}
           </>
         )}
