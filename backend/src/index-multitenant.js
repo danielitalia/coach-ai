@@ -21,8 +21,13 @@ const automation = require('./automation');
 // Monitoring System
 const MonitoringSystem = require('./monitoring');
 
-// Backup System
-const BackupSystem = require('./backup');
+// Backup System - caricato dinamicamente se disponibile
+let BackupSystem = null;
+try {
+  BackupSystem = require('./backup');
+} catch (e) {
+  console.log('Backup system not available - will be enabled on next deploy');
+}
 
 // Directory per salvare i PDF delle schede
 const WORKOUTS_DIR = path.join(__dirname, '../workouts');
@@ -3215,25 +3220,25 @@ async function startServer() {
     // Expose monitoring for API endpoints
     app.locals.monitoring = monitoring;
 
-    // Initialize and start backup system
-    const backup = new BackupSystem({
-      dbUrl: process.env.DATABASE_URL,
-      backupDir: process.env.BACKUP_DIR || '/app/backups',
-      retentionDays: parseInt(process.env.BACKUP_RETENTION_DAYS) || 7,
-      telegramToken: process.env.TELEGRAM_BOT_TOKEN,
-      telegramChatId: process.env.TELEGRAM_CHAT_ID
-    });
-    backup.start();
-
-    // Expose backup for API endpoints
-    app.locals.backup = backup;
+    // Initialize and start backup system (if available)
+    if (BackupSystem) {
+      const backup = new BackupSystem({
+        dbUrl: process.env.DATABASE_URL,
+        backupDir: process.env.BACKUP_DIR || '/app/backups',
+        retentionDays: parseInt(process.env.BACKUP_RETENTION_DAYS) || 7,
+        telegramToken: process.env.TELEGRAM_BOT_TOKEN,
+        telegramChatId: process.env.TELEGRAM_CHAT_ID
+      });
+      backup.start();
+      app.locals.backup = backup;
+    }
 
     const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
       console.log(`Coach AI Backend (Multi-Tenant) running on port ${PORT}`);
       console.log('Marketing Automation: ACTIVE');
       console.log('Monitoring System: ACTIVE');
-      console.log('Backup System: ACTIVE (daily at 03:00)');
+      console.log(`Backup System: ${BackupSystem ? 'ACTIVE (daily at 03:00)' : 'NOT AVAILABLE'}`);
     });
   } catch (error) {
     console.error('Errore avvio server:', error);
