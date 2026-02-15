@@ -172,7 +172,7 @@ app.get('/scheda/:workoutId', async (req, res) => {
 // ========== FUNZIONI HELPER ==========
 
 // Genera system prompt per tenant specifico
-function getSystemPrompt(tenant) {
+function getSystemPrompt(tenant, clientProfile = null) {
   const coachName = tenant?.coach_name || 'Coach AI';
   const gymName = tenant?.name || 'la palestra';
   const useEmoji = tenant?.use_emoji !== false;
@@ -213,6 +213,48 @@ Esempio corretto:
 
 NON scrivere mai "3 serie di 12 ripetizioni", usa SEMPRE il formato "3x12 (60s)".`;
 
+  // Aggiungi memoria cliente se disponibile
+  if (clientProfile) {
+    prompt += `\n\n=== MEMORIA CLIENTE ===
+IMPORTANTE: Conosci già questo cliente! Usa queste informazioni per personalizzare le risposte.`;
+
+    if (clientProfile.name) {
+      prompt += `\nNome: ${clientProfile.name}`;
+    }
+    if (clientProfile.fitness_goals) {
+      prompt += `\nObiettivi: ${clientProfile.fitness_goals}`;
+    }
+    if (clientProfile.fitness_level) {
+      prompt += `\nLivello: ${clientProfile.fitness_level}`;
+    }
+    if (clientProfile.training_frequency) {
+      prompt += `\nFrequenza allenamento: ${clientProfile.training_frequency}`;
+    }
+    if (clientProfile.injuries) {
+      prompt += `\nInfortuni/Limitazioni: ${clientProfile.injuries}`;
+    }
+    if (clientProfile.preferred_activities) {
+      prompt += `\nAttività preferite: ${clientProfile.preferred_activities}`;
+    }
+    if (clientProfile.total_checkins) {
+      prompt += `\nCheck-in totali: ${clientProfile.total_checkins}`;
+    }
+    if (clientProfile.member_since) {
+      prompt += `\nMembro dal: ${new Date(clientProfile.member_since).toLocaleDateString('it-IT')}`;
+    }
+    if (clientProfile.key_facts) {
+      prompt += `\n\nFATTI IMPORTANTI DA RICORDARE:\n${clientProfile.key_facts}`;
+    }
+    if (clientProfile.conversation_summary) {
+      prompt += `\n\nRIASSUNTO CONVERSAZIONI PASSATE:\n${clientProfile.conversation_summary}`;
+    }
+    if (clientProfile.last_topics) {
+      prompt += `\n\nULTIMI ARGOMENTI DISCUSSI:\n${clientProfile.last_topics}`;
+    }
+
+    prompt += `\n=== FINE MEMORIA ===\n`;
+  }
+
   if (!useEmoji) {
     prompt += '\n\nIMPORTANTE: Non usare emoji nelle risposte.';
   }
@@ -222,6 +264,68 @@ NON scrivere mai "3 serie di 12 ripetizioni", usa SEMPRE il formato "3x12 (60s)"
   }
 
   return prompt;
+}
+
+// Genera riassunto conversazione con AI
+async function generateConversationSummary(tenantId, phone) {
+  try {
+    const messages = await db.getAllMessagesForSummary(tenantId, phone, 50);
+    if (messages.length < 5) return null; // Non abbastanza messaggi per riassumere
+
+    const conversationText = messages.map(m =>
+      `${m.role === 'user' ? 'Cliente' : 'Coach'}: ${m.content}`
+    ).join('\n');
+
+    const summaryPrompt = `Analizza questa conversazione tra un coach di palestra e un cliente.
+Estrai le seguenti informazioni in formato strutturato:
+
+CONVERSAZIONE:
+${conversationText}
+
+Rispondi SOLO in questo formato JSON (senza markdown):
+{
+  "name": "nome del cliente se menzionato",
+  "fitness_goals": "obiettivi fitness menzionati",
+  "fitness_level": "livello (principiante/intermedio/avanzato)",
+  "training_frequency": "quante volte si allena a settimana",
+  "injuries": "infortuni o limitazioni fisiche",
+  "preferred_activities": "esercizi o attività preferite",
+  "key_facts": "3-5 fatti importanti da ricordare sul cliente (una frase per fatto)",
+  "conversation_summary": "riassunto di 2-3 frasi delle conversazioni passate",
+  "last_topics": "ultimi 2-3 argomenti discussi"
+}
+
+Se un campo non è stato menzionato, usa null.`;
+
+    let summaryResponse;
+
+    if (useAnthropic) {
+      const completion = await aiClient.messages.create({
+        model: 'claude-3-haiku-20240307', // Modello veloce per riassunti
+        max_tokens: 500,
+        messages: [{ role: 'user', content: summaryPrompt }]
+      });
+      summaryResponse = completion.content[0]?.text;
+    } else {
+      const completion = await aiClient.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: summaryPrompt }],
+        max_tokens: 500,
+        temperature: 0.3
+      });
+      summaryResponse = completion.choices[0]?.message?.content;
+    }
+
+    // Parse JSON response
+    const jsonMatch = summaryResponse.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return null;
+  } catch (error) {
+    console.error('Errore generazione riassunto:', error.message);
+    return null;
+  }
 }
 
 // Invia messaggio WhatsApp (Evolution API v2.x format)
@@ -610,6 +714,19 @@ async function processMessage(tenantId, tenant, phoneNumber, text) {
   try {
     await db.addMessage(tenantId, phoneNumber, 'user', text);
 
+    // Carica profilo cliente per memoria a lungo termine
+    let clientProfile = await db.getClientProfile(tenantId, phoneNumber);
+
+    // Se non esiste, crea profilo base
+    if (!clientProfile) {
+      clientProfile = await db.upsertClientProfile(tenantId, phoneNumber, {
+        member_since: new Date().toISOString().split('T')[0]
+      });
+    }
+
+    // Incrementa contatore messaggi
+    await db.incrementClientProfileStats(tenantId, phoneNumber, 'total_messages');
+
     const history = await db.getRecentMessages(tenantId, phoneNumber, 20);
 
     let aiResponse;
@@ -624,7 +741,7 @@ async function processMessage(tenantId, tenant, phoneNumber, text) {
       const completion = await aiClient.messages.create({
         model: AI_MODEL,
         max_tokens: 1000,
-        system: getSystemPrompt(tenant),
+        system: getSystemPrompt(tenant, clientProfile),
         messages: messages,
       });
 
@@ -635,7 +752,7 @@ async function processMessage(tenantId, tenant, phoneNumber, text) {
       const completion = await aiClient.chat.completions.create({
         model: AI_MODEL,
         messages: [
-          { role: 'system', content: getSystemPrompt(tenant) },
+          { role: 'system', content: getSystemPrompt(tenant, clientProfile) },
           ...history.map(m => ({ role: m.role, content: m.content }))
         ],
         max_tokens: 1000,
@@ -647,6 +764,13 @@ async function processMessage(tenantId, tenant, phoneNumber, text) {
     }
 
     await db.addMessage(tenantId, phoneNumber, 'assistant', aiResponse);
+
+    // Aggiorna riassunto ogni 10 messaggi (async, non blocca la risposta)
+    if (clientProfile.total_messages && clientProfile.total_messages % 10 === 0) {
+      updateClientMemory(tenantId, phoneNumber).catch(err =>
+        console.error('Errore aggiornamento memoria:', err.message)
+      );
+    }
 
     // Detecta se la risposta contiene una scheda di allenamento completa
     const daysMatched = (aiResponse.match(/giorno\s*\d/gi) || []);
@@ -676,6 +800,40 @@ async function processMessage(tenantId, tenant, phoneNumber, text) {
     console.error('Full error:', JSON.stringify(error, null, 2));
     return "Ops! Ho avuto un problema tecnico. Riprova tra poco! 🙏";
   }
+}
+
+// Aggiorna la memoria del cliente (background)
+async function updateClientMemory(tenantId, phoneNumber) {
+  console.log(`[Memory] Aggiornamento memoria per ${phoneNumber}...`);
+
+  const summary = await generateConversationSummary(tenantId, phoneNumber);
+  if (!summary) return;
+
+  // Aggiorna profilo con le info estratte
+  const updateData = {};
+  if (summary.name) updateData.name = summary.name;
+  if (summary.fitness_goals) updateData.fitness_goals = summary.fitness_goals;
+  if (summary.fitness_level) updateData.fitness_level = summary.fitness_level;
+  if (summary.training_frequency) updateData.training_frequency = summary.training_frequency;
+  if (summary.injuries) updateData.injuries = summary.injuries;
+  if (summary.preferred_activities) updateData.preferred_activities = summary.preferred_activities;
+
+  if (Object.keys(updateData).length > 0) {
+    await db.upsertClientProfile(tenantId, phoneNumber, updateData);
+  }
+
+  // Aggiorna riassunto e fatti chiave
+  if (summary.conversation_summary || summary.key_facts || summary.last_topics) {
+    await db.updateClientProfileSummary(
+      tenantId,
+      phoneNumber,
+      summary.conversation_summary || null,
+      summary.key_facts || null,
+      summary.last_topics || null
+    );
+  }
+
+  console.log(`[Memory] Memoria aggiornata per ${phoneNumber}`);
 }
 
 // ========== CHECK-IN ==========

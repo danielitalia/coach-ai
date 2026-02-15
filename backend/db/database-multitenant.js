@@ -1362,6 +1362,99 @@ async function backfillAnalytics(tenantId, daysBack = 30) {
   return results;
 }
 
+// ========== CLIENT MEMORY (Long-term) ==========
+
+async function getClientProfile(tenantId, phone) {
+  const result = await pool.query(
+    'SELECT * FROM client_profiles WHERE tenant_id = $1 AND phone = $2',
+    [tenantId, phone]
+  );
+  return result.rows[0] || null;
+}
+
+async function upsertClientProfile(tenantId, phone, data) {
+  const fields = [];
+  const values = [tenantId, phone];
+  let paramIndex = 3;
+
+  const allowedFields = [
+    'name', 'age', 'gender', 'fitness_goals', 'fitness_level',
+    'training_frequency', 'preferred_activities', 'injuries',
+    'health_notes', 'preferred_time', 'communication_style',
+    'conversation_summary', 'key_facts', 'last_topics',
+    'total_messages', 'total_checkins', 'member_since'
+  ];
+
+  for (const [key, value] of Object.entries(data)) {
+    const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+    if (allowedFields.includes(snakeKey) && value !== undefined) {
+      fields.push(snakeKey);
+      values.push(value);
+      paramIndex++;
+    }
+  }
+
+  if (fields.length === 0) {
+    // Crea profilo vuoto se non esiste
+    const result = await pool.query(`
+      INSERT INTO client_profiles (tenant_id, phone)
+      VALUES ($1, $2)
+      ON CONFLICT (tenant_id, phone) DO NOTHING
+      RETURNING *
+    `, [tenantId, phone]);
+    return result.rows[0] || await getClientProfile(tenantId, phone);
+  }
+
+  const insertFields = ['tenant_id', 'phone', ...fields];
+  const insertPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
+  const updateSet = fields.map((f, i) => `${f} = $${i + 3}`).join(', ');
+
+  const result = await pool.query(`
+    INSERT INTO client_profiles (${insertFields.join(', ')})
+    VALUES (${insertPlaceholders})
+    ON CONFLICT (tenant_id, phone) DO UPDATE SET
+      ${updateSet},
+      updated_at = NOW()
+    RETURNING *
+  `, values);
+
+  return result.rows[0];
+}
+
+async function updateClientProfileSummary(tenantId, phone, summary, keyFacts, lastTopics) {
+  const result = await pool.query(`
+    UPDATE client_profiles
+    SET conversation_summary = $3,
+        key_facts = $4,
+        last_topics = $5,
+        summary_updated_at = NOW(),
+        updated_at = NOW()
+    WHERE tenant_id = $1 AND phone = $2
+    RETURNING *
+  `, [tenantId, phone, summary, keyFacts, lastTopics]);
+  return result.rows[0];
+}
+
+async function incrementClientProfileStats(tenantId, phone, field) {
+  await pool.query(`
+    INSERT INTO client_profiles (tenant_id, phone, ${field}, member_since)
+    VALUES ($1, $2, 1, CURRENT_DATE)
+    ON CONFLICT (tenant_id, phone) DO UPDATE SET
+      ${field} = COALESCE(client_profiles.${field}, 0) + 1,
+      updated_at = NOW()
+  `, [tenantId, phone]);
+}
+
+async function getAllMessagesForSummary(tenantId, phone, limit = 100) {
+  const result = await pool.query(`
+    SELECT role, content, created_at FROM messages
+    WHERE tenant_id = $1 AND phone = $2
+    ORDER BY created_at DESC
+    LIMIT $3
+  `, [tenantId, phone, limit]);
+  return result.rows.reverse();
+}
+
 // ========== EXPORTS ==========
 
 module.exports = {
@@ -1498,5 +1591,12 @@ module.exports = {
   getAnalyticsEvents,
   getGlobalAnalytics,
   calculateAndStoreDailyStats,
-  backfillAnalytics
+  backfillAnalytics,
+
+  // Client Memory
+  getClientProfile,
+  upsertClientProfile,
+  updateClientProfileSummary,
+  incrementClientProfileStats,
+  getAllMessagesForSummary
 };
