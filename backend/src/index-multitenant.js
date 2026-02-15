@@ -878,6 +878,9 @@ async function processCheckin(tenantId, tenant, phoneNumber) {
 
     await db.addCheckin(tenantId, phoneNumber, workoutDay);
 
+    // Aggiorna contatore check-in nel profilo memoria
+    await db.incrementClientProfileStats(tenantId, phoneNumber, 'total_checkins');
+
     // Completa referral se primo check-in
     const checkinStats = await db.getCheckinStats(tenantId, phoneNumber);
     const isFirstCheckin = parseInt(checkinStats?.total_checkins) === 1;

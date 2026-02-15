@@ -1455,6 +1455,29 @@ async function getAllMessagesForSummary(tenantId, phone, limit = 100) {
   return result.rows.reverse();
 }
 
+// Sincronizza i profili clienti con i dati esistenti (check-in, messaggi)
+async function syncClientProfiles(tenantId) {
+  // Per ogni cliente, calcola e aggiorna le stats
+  const result = await pool.query(`
+    INSERT INTO client_profiles (tenant_id, phone, total_checkins, total_messages, member_since)
+    SELECT
+      c.tenant_id,
+      c.phone,
+      COALESCE((SELECT COUNT(*) FROM checkins WHERE tenant_id = c.tenant_id AND phone = c.phone), 0) as total_checkins,
+      COALESCE((SELECT COUNT(*) FROM messages WHERE tenant_id = c.tenant_id AND phone = c.phone), 0) as total_messages,
+      DATE(c.created_at) as member_since
+    FROM clients c
+    WHERE c.tenant_id = $1
+    ON CONFLICT (tenant_id, phone) DO UPDATE SET
+      total_checkins = EXCLUDED.total_checkins,
+      total_messages = EXCLUDED.total_messages,
+      member_since = COALESCE(client_profiles.member_since, EXCLUDED.member_since),
+      updated_at = NOW()
+    RETURNING *
+  `, [tenantId]);
+  return result.rows;
+}
+
 // ========== EXPORTS ==========
 
 module.exports = {
@@ -1598,5 +1621,6 @@ module.exports = {
   upsertClientProfile,
   updateClientProfileSummary,
   incrementClientProfileStats,
-  getAllMessagesForSummary
+  getAllMessagesForSummary,
+  syncClientProfiles
 };
