@@ -5,6 +5,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 // Database Multi-tenant
@@ -13,10 +14,13 @@ const db = require('../db/database-multitenant');
 // Auth routes
 const authRoutes = require('./routes/auth');
 const tenantRoutes = require('./routes/tenants');
-const { requireTenant, identifyTenantFromWhatsApp } = require('./middleware/auth');
+const { requireAuth, requireSuperadmin, requireTenant, identifyTenantFromWhatsApp, verifyToken } = require('./middleware/auth');
 
 // Marketing Automation
 const automation = require('./automation');
+
+// Brain AI - Sistema Intelligente
+const brain = require('./brain');
 
 // Monitoring System
 const MonitoringSystem = require('./monitoring');
@@ -36,7 +40,51 @@ if (!fs.existsSync(WORKOUTS_DIR)) {
 }
 
 const app = express();
+
+// Trust proxy per rate limiter dietro Coolify/Docker
+app.set('trust proxy', 1);
+
 app.use(express.json());
+
+// Rate limiting per protezione API
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minuti
+  max: 300, // max 300 richieste per IP (SPA fa molte fetch per pagina)
+  message: { error: 'Troppe richieste, riprova più tardi' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const superadminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minuti
+  max: 1000, // superadmin è già protetto da JWT + is_superadmin
+  message: { error: 'Troppe richieste superadmin' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const webhookLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minuto
+  max: 120, // WhatsApp può inviare burst di messaggi
+  message: { error: 'Rate limit exceeded' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minuti
+  max: 10, // max 10 tentativi login
+  message: { error: 'Troppi tentativi di login, riprova più tardi' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Applica rate limiting (ordine importante: specifici prima del generico)
+app.use('/api/superadmin/', superadminLimiter);
+app.use('/api/monitoring/', superadminLimiter);
+app.use('/api/', apiLimiter);
+app.use('/webhook', webhookLimiter);
+app.use('/api/auth/login', authLimiter);
 
 // CORS per dashboard
 app.use((req, res, next) => {
@@ -51,7 +99,7 @@ app.use((req, res, next) => {
 
 // AI Client - Supporta OpenAI, Groq, e Anthropic Claude
 const AI_PROVIDER = process.env.AI_PROVIDER || 'openai';
-const AI_MODEL = process.env.AI_MODEL || 'claude-sonnet-4-20250514';
+const AI_MODEL = process.env.OPENAI_MODEL || process.env.AI_MODEL || 'llama-3.3-70b-versatile';
 
 let aiClient;
 let useAnthropic = false;
@@ -719,6 +767,11 @@ async function processMessage(tenantId, tenant, phoneNumber, text) {
   try {
     await db.addMessage(tenantId, phoneNumber, 'user', text);
 
+    // 🧠 Brain: Analizza messaggio in real-time (async, non blocca)
+    brain.analyzeMessage(tenantId, phoneNumber, text).catch(err =>
+      console.error('[Brain] Analyzer hook error:', err.message)
+    );
+
     // Carica profilo cliente per memoria a lungo termine
     let clientProfile = await db.getClientProfile(tenantId, phoneNumber);
 
@@ -1303,33 +1356,27 @@ async function generateWorkoutPlan(tenantId, clientData) {
 
 const DEFAULT_TENANT_ID = 'a0000000-0000-0000-0000-000000000001';
 
-// Middleware helper per retrocompatibilità (permette auth JWT o accesso legacy)
+// Middleware: richiede JWT con tenantId (nessun fallback a default)
 const legacyTenant = async (req, res, next) => {
   try {
-    // Prima prova autenticazione JWT
     const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const { verifyToken } = require('./middleware/auth');
-      const token = authHeader.split(' ')[1];
-      const decoded = verifyToken(token);
-      if (decoded && decoded.tenantId) {
-        req.tenantId = decoded.tenantId;
-        req.tenant = await db.getTenant(decoded.tenantId);
-        req.user = await db.getUserById(decoded.userId);
-        return next();
-      }
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Token mancante' });
     }
 
-    // Fallback: usa tenant da header o default
-    const tenantId = req.headers['x-tenant-id'] || DEFAULT_TENANT_ID;
-    req.tenantId = tenantId;
-    req.tenant = await db.getTenant(tenantId);
+    const token = authHeader.split(' ')[1];
+    const decoded = verifyToken(token);
+    if (!decoded || !decoded.tenantId) {
+      return res.status(401).json({ error: 'Token non valido o scaduto' });
+    }
+
+    req.tenantId = decoded.tenantId;
+    req.tenant = await db.getTenant(decoded.tenantId);
+    req.user = await db.getUserById(decoded.userId);
     next();
   } catch (error) {
-    // In caso di errore, usa comunque il tenant default
-    req.tenantId = DEFAULT_TENANT_ID;
-    req.tenant = await db.getTenant(DEFAULT_TENANT_ID);
-    next();
+    console.error('Auth error in legacyTenant:', error);
+    return res.status(401).json({ error: 'Errore autenticazione' });
   }
 };
 
@@ -1948,7 +1995,7 @@ app.get('/api/checkin-qrcode', legacyTenant, async (req, res) => {
       { headers: { 'apikey': EVOLUTION_API_KEY } }
     ).catch(() => null);
 
-    if (statusResponse?.data?.state !== 'open') {
+    if ((statusResponse?.data?.instance?.state || statusResponse?.data?.state) !== 'open') {
       return res.status(400).json({ error: 'WhatsApp non connesso' });
     }
 
@@ -2201,6 +2248,85 @@ app.delete('/api/automations/:id', legacyTenant, async (req, res) => {
   }
 });
 
+// ========== BRAIN AI ENDPOINTS ==========
+
+// Brain: Overview completo per dashboard
+app.get('/api/brain/overview', legacyTenant, async (req, res) => {
+  try {
+    const overview = await brain.getOverview(req.tenant.id);
+    res.json(overview);
+  } catch (error) {
+    console.error('Errore brain overview:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Brain: Lista clienti con score
+app.get('/api/brain/clients', legacyTenant, async (req, res) => {
+  try {
+    const clients = await brain.scoring.getAllClientScores(req.tenant.id, db);
+    res.json(clients);
+  } catch (error) {
+    console.error('Errore brain clients:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Brain: Clienti a rischio
+app.get('/api/brain/at-risk', legacyTenant, async (req, res) => {
+  try {
+    const minRisk = parseFloat(req.query.minRisk) || 0.6;
+    const clients = await brain.scoring.getAtRiskClients(req.tenant.id, db, minRisk);
+    res.json(clients);
+  } catch (error) {
+    console.error('Errore brain at-risk:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Brain: Segnali conversazione recenti
+app.get('/api/brain/signals', legacyTenant, async (req, res) => {
+  try {
+    const stats = await brain.analyzer.getSignalStats(req.tenant.id, db, 30);
+    res.json(stats);
+  } catch (error) {
+    console.error('Errore brain signals:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Brain: Azioni recenti
+app.get('/api/brain/actions', legacyTenant, async (req, res) => {
+  try {
+    const actions = await brain.actions.getRecentActions(req.tenant.id, db, 50);
+    res.json(actions);
+  } catch (error) {
+    console.error('Errore brain actions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Brain: Esegui ciclo manualmente
+app.post('/api/brain/run', legacyTenant, async (req, res) => {
+  try {
+    res.json({ message: 'Brain cycle avviato' });
+    // Esegui in background
+    brain.runNow().catch(err => console.error('Brain manual run error:', err));
+  } catch (error) {
+    console.error('Errore brain run:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Brain: Status
+app.get('/api/brain/status', legacyTenant, async (req, res) => {
+  try {
+    res.json(brain.getStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // AI config alias
 app.get('/api/ai/config', legacyTenant, async (req, res) => {
   try {
@@ -2370,7 +2496,7 @@ app.get('/api/legacy/checkin/qrcode', legacyTenant, async (req, res) => {
       { headers: { 'apikey': EVOLUTION_API_KEY } }
     ).catch(() => null);
 
-    if (statusResponse?.data?.state !== 'open') {
+    if ((statusResponse?.data?.instance?.state || statusResponse?.data?.state) !== 'open') {
       return res.status(400).json({ error: 'WhatsApp non connesso' });
     }
 
@@ -2409,7 +2535,7 @@ app.get('/api/legacy/checkin/qrcode', legacyTenant, async (req, res) => {
 // ========== SUPER ADMIN API ==========
 
 // Get all tenants with stats
-app.get('/api/superadmin/tenants', async (req, res) => {
+app.get('/api/superadmin/tenants', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     // Get all tenants
     const tenantsResult = await db.pool.query(`
@@ -2431,6 +2557,30 @@ app.get('/api/superadmin/tenants', async (req, res) => {
          JOIN messages m ON c.phone = m.phone AND c.tenant_id = m.tenant_id
          WHERE m.created_at > NOW() - INTERVAL '24 hours') as active_today
     `);
+
+    // Real-time WhatsApp status check via Evolution API
+    const tenantsWithInstances = tenantsResult.rows.filter(t => t.whatsapp_instance_name);
+    if (tenantsWithInstances.length > 0) {
+      const statusChecks = tenantsWithInstances.map(async (t) => {
+        try {
+          const response = await axios.get(
+            `${EVOLUTION_API_URL}/instance/connectionState/${t.whatsapp_instance_name}`,
+            { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 5000 }
+          ).catch(() => null);
+          const connected = response?.data?.instance?.state === 'open' || response?.data?.state === 'open';
+          if (connected !== t.whatsapp_connected) {
+            await db.pool.query(
+              'UPDATE tenants SET whatsapp_connected = $1 WHERE id = $2',
+              [connected, t.id]
+            );
+            t.whatsapp_connected = connected;
+          }
+        } catch (err) {
+          // Keep DB value if Evolution API unreachable
+        }
+      });
+      await Promise.all(statusChecks);
+    }
 
     const tenants = tenantsResult.rows.map(t => ({
       id: t.id,
@@ -2470,7 +2620,7 @@ app.get('/api/superadmin/tenants', async (req, res) => {
 });
 
 // Create new tenant
-app.post('/api/superadmin/tenants', async (req, res) => {
+app.post('/api/superadmin/tenants', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const { name, slug, coachName, useEmoji, whatsappInstanceName } = req.body;
 
@@ -2482,6 +2632,19 @@ app.post('/api/superadmin/tenants', async (req, res) => {
     const existing = await db.pool.query('SELECT id FROM tenants WHERE slug = $1', [slug]);
     if (existing.rows.length > 0) {
       return res.status(400).json({ error: 'Slug già esistente' });
+    }
+
+    // Check if whatsapp instance name is already used by another tenant
+    if (whatsappInstanceName) {
+      const dup = await db.pool.query(
+        'SELECT id, name FROM tenants WHERE whatsapp_instance_name = $1',
+        [whatsappInstanceName]
+      );
+      if (dup.rows.length > 0) {
+        return res.status(400).json({
+          error: `Istanza "${whatsappInstanceName}" già usata dal tenant "${dup.rows[0].name}"`
+        });
+      }
     }
 
     const result = await db.pool.query(`
@@ -2498,13 +2661,26 @@ app.post('/api/superadmin/tenants', async (req, res) => {
 });
 
 // Update tenant
-app.put('/api/superadmin/tenants/:id', async (req, res) => {
+app.put('/api/superadmin/tenants/:id', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const { id } = req.params;
     const {
       name, coachName, useEmoji, whatsappInstanceName,
       subscriptionPlan, subscriptionStatus, subscriptionExpiresAt, subscriptionPrice, subscriptionNotes
     } = req.body;
+
+    // Check if whatsapp instance name is already used by another tenant
+    if (whatsappInstanceName) {
+      const dup = await db.pool.query(
+        'SELECT id, name FROM tenants WHERE whatsapp_instance_name = $1 AND id != $2',
+        [whatsappInstanceName, id]
+      );
+      if (dup.rows.length > 0) {
+        return res.status(400).json({
+          error: `Istanza "${whatsappInstanceName}" già usata dal tenant "${dup.rows[0].name}"`
+        });
+      }
+    }
 
     const result = await db.pool.query(`
       UPDATE tenants
@@ -2541,7 +2717,7 @@ app.put('/api/superadmin/tenants/:id', async (req, res) => {
 });
 
 // Delete tenant
-app.delete('/api/superadmin/tenants/:id', async (req, res) => {
+app.delete('/api/superadmin/tenants/:id', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -2574,7 +2750,7 @@ app.delete('/api/superadmin/tenants/:id', async (req, res) => {
 });
 
 // Get single tenant details
-app.get('/api/superadmin/tenants/:id', async (req, res) => {
+app.get('/api/superadmin/tenants/:id', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -2618,7 +2794,7 @@ app.get('/api/superadmin/tenants/:id', async (req, res) => {
 // ========== MONITORING API ENDPOINTS ==========
 
 // Get system health status
-app.get('/api/monitoring/health', async (req, res) => {
+app.get('/api/monitoring/health', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const monitoring = req.app.locals.monitoring;
     if (!monitoring) {
@@ -2634,7 +2810,7 @@ app.get('/api/monitoring/health', async (req, res) => {
 });
 
 // Get recent alerts
-app.get('/api/monitoring/alerts', async (req, res) => {
+app.get('/api/monitoring/alerts', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
 
@@ -2652,7 +2828,7 @@ app.get('/api/monitoring/alerts', async (req, res) => {
 });
 
 // Acknowledge an alert
-app.post('/api/monitoring/alerts/:id/acknowledge', async (req, res) => {
+app.post('/api/monitoring/alerts/:id/acknowledge', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -2669,7 +2845,7 @@ app.post('/api/monitoring/alerts/:id/acknowledge', async (req, res) => {
 });
 
 // Test Telegram connection
-app.post('/api/monitoring/test-telegram', async (req, res) => {
+app.post('/api/monitoring/test-telegram', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const monitoring = req.app.locals.monitoring;
     if (!monitoring) {
@@ -2684,7 +2860,7 @@ app.post('/api/monitoring/test-telegram', async (req, res) => {
 });
 
 // Get monitoring stats
-app.get('/api/monitoring/stats', async (req, res) => {
+app.get('/api/monitoring/stats', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const stats = await db.pool.query(`
       SELECT
@@ -2708,7 +2884,7 @@ app.get('/api/monitoring/stats', async (req, res) => {
 // ========== ONBOARDING API ENDPOINTS ==========
 
 // Generate onboarding link for a tenant (SuperAdmin)
-app.post('/api/superadmin/tenants/:id/onboarding', async (req, res) => {
+app.post('/api/superadmin/tenants/:id/onboarding', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -2737,7 +2913,7 @@ app.post('/api/superadmin/tenants/:id/onboarding', async (req, res) => {
 });
 
 // Get onboarding status for a tenant (SuperAdmin)
-app.get('/api/superadmin/tenants/:id/onboarding', async (req, res) => {
+app.get('/api/superadmin/tenants/:id/onboarding', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -2847,8 +3023,23 @@ app.post('/api/onboarding/:token/step/:step', async (req, res) => {
         gym_hours: stepData.hours,
         logo_url: stepData.logoUrl
       });
-    } else if (stepNum === 3) {
-      // Step 3: Coach customization
+    } else if (stepNum === 2) {
+      // Step 2: Credentials - Validate email not already used
+      const { email, password } = stepData;
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Email e password sono obbligatori' });
+      }
+      if (password.length < 8) {
+        return res.status(400).json({ error: 'La password deve avere almeno 8 caratteri' });
+      }
+      // Check if email is already registered
+      const existingUser = await db.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+      if (existingUser.rows.length > 0) {
+        return res.status(400).json({ error: 'Email già registrata. Usa un\'altra email.' });
+      }
+      // Step data will be saved to step_data.step2 (done above)
+    } else if (stepNum === 4) {
+      // Step 4: Coach customization (was step 3)
       await db.updateTenantOnboardingData(onboarding.tenant_id, {
         coach_name: stepData.coachName,
         coach_tone: stepData.coachTone,
@@ -2965,6 +3156,32 @@ app.post('/api/onboarding/:token/complete', async (req, res) => {
       return res.status(410).json({ error: 'Onboarding già completato' });
     }
 
+    // Create user account from step2 data
+    const stepData = onboarding.step_data || {};
+    const step2 = stepData.step2 || {};
+    let createdUserEmail = null;
+
+    if (step2.email && step2.password) {
+      // Hash password
+      const bcrypt = require('bcryptjs');
+      const passwordHash = await bcrypt.hash(step2.password, 10);
+
+      // Create user
+      const userResult = await db.query(
+        'INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id',
+        [step2.email.toLowerCase(), passwordHash, step2.adminName || 'Admin']
+      );
+
+      // Link user to tenant as owner
+      await db.query(
+        'INSERT INTO user_tenants (user_id, tenant_id, role) VALUES ($1, $2, $3)',
+        [userResult.rows[0].id, onboarding.tenant_id, 'owner']
+      );
+
+      createdUserEmail = step2.email;
+      console.log('Utente creato:', step2.email, 'per tenant:', onboarding.tenant_id);
+    }
+
     // Complete the onboarding
     await db.completeOnboarding(token);
     console.log('Onboarding completato per token:', token);
@@ -3065,7 +3282,7 @@ app.post('/api/analytics/backfill', requireTenant, async (req, res) => {
 });
 
 // SUPERADMIN: Get global analytics for all tenants
-app.get('/api/superadmin/analytics', async (req, res) => {
+app.get('/api/superadmin/analytics', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const analytics = await db.getGlobalAnalytics();
     res.json(analytics);
@@ -3076,7 +3293,7 @@ app.get('/api/superadmin/analytics', async (req, res) => {
 });
 
 // SUPERADMIN: Backfill analytics for all tenants
-app.post('/api/superadmin/analytics/backfill-all', async (req, res) => {
+app.post('/api/superadmin/analytics/backfill-all', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const days = parseInt(req.body.days) || 30;
     const tenants = await db.getAllTenants();
@@ -3101,7 +3318,7 @@ app.post('/api/superadmin/analytics/backfill-all', async (req, res) => {
 // ========== BACKUP ==========
 
 // SUPERADMIN: Get backup stats
-app.get('/api/superadmin/backups', async (req, res) => {
+app.get('/api/superadmin/backups', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const backup = req.app.locals.backup;
     if (!backup) {
@@ -3119,7 +3336,7 @@ app.get('/api/superadmin/backups', async (req, res) => {
 });
 
 // SUPERADMIN: Trigger manual backup
-app.post('/api/superadmin/backups/run', async (req, res) => {
+app.post('/api/superadmin/backups/run', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const backup = req.app.locals.backup;
     if (!backup) {
@@ -3135,7 +3352,7 @@ app.post('/api/superadmin/backups/run', async (req, res) => {
 });
 
 // SUPERADMIN: Download a backup file
-app.get('/api/superadmin/backups/download/:filename', async (req, res) => {
+app.get('/api/superadmin/backups/download/:filename', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const backup = req.app.locals.backup;
     if (!backup) {
@@ -3162,7 +3379,7 @@ app.get('/api/superadmin/backups/download/:filename', async (req, res) => {
 });
 
 // SUPERADMIN: Clean old backups manually
-app.post('/api/superadmin/backups/clean', async (req, res) => {
+app.post('/api/superadmin/backups/clean', requireAuth, requireSuperadmin, async (req, res) => {
   try {
     const backup = req.app.locals.backup;
     if (!backup) {
@@ -3189,7 +3406,8 @@ async function startServer() {
       { name: 'automation', file: '003-automation.sql' },
       { name: 'monitoring', file: '005-monitoring.sql' },
       { name: 'onboarding', file: '006-onboarding.sql' },
-      { name: 'analytics', file: '007-analytics.sql' }
+      { name: 'analytics', file: '007-analytics.sql' },
+      { name: 'brain', file: '009-brain.sql' }
     ];
 
     for (const migration of migrations) {
@@ -3210,6 +3428,10 @@ async function startServer() {
     // Initialize and start marketing automation
     automation.init(db, sendWhatsAppMessage);
     automation.start();
+
+    // Initialize and start Brain AI
+    brain.init(db, sendWhatsAppMessage, aiClient, AI_MODEL, useAnthropic);
+    brain.start();
 
     // Initialize and start monitoring system
     const monitoring = new MonitoringSystem(db, {

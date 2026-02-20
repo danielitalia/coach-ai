@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
+const API_URL = import.meta.env.VITE_API_URL || ''
 import { BrowserRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom'
 import {
   Users, MessageSquare, BarChart3, Settings as SettingsIcon,
   Dumbbell, Menu, X, Phone, Clock, TrendingUp,
   UserPlus, Activity, Calendar, Bell, Smartphone, QrCode, Gift,
-  LogOut, User, ChevronDown, Zap
+  LogOut, User, ChevronDown, Zap, Brain
 } from 'lucide-react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import LoginPage from './components/LoginPage'
@@ -21,6 +22,7 @@ import Referral from './components/Referral'
 import Automations from './components/Automations'
 import SuperAdmin from './components/SuperAdmin'
 import OnboardingWizard from './components/OnboardingWizard'
+import BrainInsights from './components/BrainInsights'
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -56,6 +58,7 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
     { to: '/workouts', icon: Dumbbell, label: 'Schede' },
     { to: '/checkin', icon: QrCode, label: 'Check-in' },
     { to: '/referral', icon: Gift, label: 'Referral' },
+    { to: '/brain', icon: Brain, label: 'Brain AI' },
     { to: '/automations', icon: Zap, label: 'Automazioni' },
     { to: '/reminders', icon: Bell, label: 'Promemoria' },
     { to: '/whatsapp', icon: Smartphone, label: 'WhatsApp' },
@@ -174,7 +177,7 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
 }
 
 function Dashboard() {
-  const { tenant } = useAuth()
+  const { tenant, authFetch } = useAuth()
   const [stats, setStats] = useState({
     totalClients: 0,
     activeToday: 0,
@@ -189,7 +192,7 @@ function Dashboard() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/stats')
+      const res = await authFetch(`${API_URL}/api/stats`)
       if (res.ok) {
         const data = await res.json()
         setStats(data)
@@ -336,13 +339,13 @@ function formatTime(date) {
 function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [whatsappStatus, setWhatsappStatus] = useState({ connected: false })
-  const { tenant } = useAuth()
+  const { tenant, authFetch } = useAuth()
 
   // Check WhatsApp status periodically
   useEffect(() => {
     const checkWhatsAppStatus = async () => {
       try {
-        const res = await fetch('/api/whatsapp/status')
+        const res = await authFetch(`${API_URL}/api/whatsapp/status`)
         if (res.ok) {
           const data = await res.json()
           setWhatsappStatus(data)
@@ -387,6 +390,7 @@ function MainLayout() {
             <Route path="/workouts" element={<WorkoutPlans />} />
             <Route path="/checkin" element={<CheckIn />} />
             <Route path="/referral" element={<Referral />} />
+            <Route path="/brain" element={<BrainInsights />} />
             <Route path="/automations" element={<Automations />} />
             <Route path="/reminders" element={<Reminders />} />
             <Route path="/settings" element={<SettingsPage />} />
