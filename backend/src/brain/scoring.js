@@ -58,10 +58,10 @@ async function scoreAllClients(tenantId, db) {
 async function scoreClient(tenantId, phone, db) {
   // 1. Recupera check-in degli ultimi 60 giorni
   const checkinsResult = await db.pool.query(`
-    SELECT created_at, workout_day
+    SELECT checked_in_at, workout_day
     FROM checkins
-    WHERE tenant_id = $1 AND phone = $2 AND created_at > NOW() - INTERVAL '60 days'
-    ORDER BY created_at DESC
+    WHERE tenant_id = $1 AND phone = $2 AND checked_in_at > NOW() - INTERVAL '60 days'
+    ORDER BY checked_in_at DESC
   `, [tenantId, phone]);
 
   const checkins = checkinsResult.rows;
@@ -87,14 +87,14 @@ async function scoreClient(tenantId, phone, db) {
   const now = new Date();
 
   // --- Giorni dall'ultimo check-in ---
-  const lastCheckin = checkins.length > 0 ? new Date(checkins[0].created_at) : null;
+  const lastCheckin = checkins.length > 0 ? new Date(checkins[0].checked_in_at) : null;
   const daysSinceLastCheckin = lastCheckin
     ? Math.floor((now - lastCheckin) / (1000 * 60 * 60 * 24))
     : 999;
 
   // --- Check-in ultimi 30 giorni ---
   const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
-  const checkins30d = checkins.filter(c => new Date(c.created_at) > thirtyDaysAgo);
+  const checkins30d = checkins.filter(c => new Date(c.checked_in_at) > thirtyDaysAgo);
   const totalCheckins30d = checkins30d.length;
   const avgCheckinsPerWeek = Math.round((totalCheckins30d / 4.3) * 10) / 10;
 
@@ -104,7 +104,7 @@ async function scoreClient(tenantId, phone, db) {
     const weekStart = new Date(now - (w + 1) * 7 * 24 * 60 * 60 * 1000);
     const weekEnd = new Date(now - w * 7 * 24 * 60 * 60 * 1000);
     const count = checkins.filter(c => {
-      const d = new Date(c.created_at);
+      const d = new Date(c.checked_in_at);
       return d >= weekStart && d < weekEnd;
     }).length;
     weeklyHistory.unshift(count); // [settimana -4, -3, -2, -1]
@@ -122,7 +122,7 @@ async function scoreClient(tenantId, phone, db) {
   const dayCount = {};
   const hourCount = {};
   for (const c of checkins) {
-    const d = new Date(c.created_at);
+    const d = new Date(c.checked_in_at);
     const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][d.getDay()];
     const hour = d.getHours();
     dayCount[dayName] = (dayCount[dayName] || 0) + 1;
@@ -144,7 +144,7 @@ async function scoreClient(tenantId, phone, db) {
   if (checkins.length >= 3) {
     const intervals = [];
     for (let i = 0; i < checkins.length - 1; i++) {
-      const diff = (new Date(checkins[i].created_at) - new Date(checkins[i + 1].created_at)) / (1000 * 60 * 60 * 24);
+      const diff = (new Date(checkins[i].checked_in_at) - new Date(checkins[i + 1].checked_in_at)) / (1000 * 60 * 60 * 24);
       intervals.push(diff);
     }
     const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
