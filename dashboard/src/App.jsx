@@ -23,6 +23,7 @@ import Automations from './components/Automations'
 import SuperAdmin from './components/SuperAdmin'
 import OnboardingWizard from './components/OnboardingWizard'
 import BrainInsights from './components/BrainInsights'
+import LandingPage from './components/LandingPage'
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -402,6 +403,35 @@ function MainLayout() {
   )
 }
 
+function RootRoute() {
+  const { isAuthenticated, loading } = useAuth()
+  const location = useLocation()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-500">Caricamento...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Unauthenticated at root → landing page
+  if (!isAuthenticated && location.pathname === '/') {
+    return <LandingPage />
+  }
+
+  // Unauthenticated at any other path → login
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+
+  // Authenticated → dashboard
+  return <MainLayout />
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -411,11 +441,7 @@ function App() {
           <Route path="/register" element={<RegisterPageWrapper />} />
           <Route path="/superadmin" element={<SuperAdmin />} />
           <Route path="/onboarding/:token" element={<OnboardingWizard />} />
-          <Route path="/*" element={
-            <ProtectedRoute>
-              <MainLayout />
-            </ProtectedRoute>
-          } />
+          <Route path="/*" element={<RootRoute />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
