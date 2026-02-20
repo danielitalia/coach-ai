@@ -122,6 +122,19 @@ async function requireTenant(req, res, next) {
   }
 }
 
+// Middleware: richiede superadmin (da usare DOPO requireAuth)
+async function requireSuperadmin(req, res, next) {
+  try {
+    if (!req.user || !req.user.is_superadmin) {
+      return res.status(403).json({ error: 'Accesso riservato al superadmin' });
+    }
+    next();
+  } catch (error) {
+    console.error('Superadmin check error:', error);
+    res.status(500).json({ error: 'Errore verifica superadmin' });
+  }
+}
+
 // Middleware: richiede ruolo specifico
 function requireRole(...roles) {
   return (req, res, next) => {
@@ -186,12 +199,10 @@ async function identifyTenantFromWhatsApp(req, res, next) {
       }
     }
 
-    // Se non trova tenant, usa il default (per retrocompatibilità)
-    const defaultTenant = await db.getTenantBySlug('centro-fitness-amati');
-    if (defaultTenant) {
-      req.tenant = defaultTenant;
-      req.tenantId = defaultTenant.id;
-    }
+    // Nessun tenant trovato — non processare il messaggio
+    console.warn('⚠️ Webhook: tenant non identificato per instance:', data.instance || 'unknown');
+    req.tenant = null;
+    req.tenantId = null;
 
     next();
   } catch (error) {
@@ -206,6 +217,7 @@ module.exports = {
   generateRefreshToken,
   verifyToken,
   requireAuth,
+  requireSuperadmin,
   requireTenant,
   requireRole,
   optionalTenant,
