@@ -24,6 +24,10 @@ let isRunning = false;
  * Inizializza il Brain
  */
 function init(database, sendMessage, aiClient, aiModel, isAnthropic) {
+  if (!database || !sendMessage) {
+    console.error('[Brain] ❌ Init FAILED: database and sendMessage are required');
+    return;
+  }
   db = database;
   sendWhatsAppMessage = sendMessage;
   actions.initAI(aiClient, aiModel, isAnthropic);

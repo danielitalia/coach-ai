@@ -412,10 +412,14 @@ function ClientsTab({ allScores, expandedClient, setExpandedClient }) {
                           <div className="col-span-2">
                             <p className="text-gray-500 text-xs mb-1">Check-in ultime 4 settimane</p>
                             <div className="flex gap-1 items-end h-8">
-                              {(typeof client.weekly_checkins_history === 'string'
-                                ? JSON.parse(client.weekly_checkins_history)
-                                : client.weekly_checkins_history || []
-                              ).map((count, wi) => (
+                              {(() => {
+                                try {
+                                  const data = typeof client.weekly_checkins_history === 'string'
+                                    ? JSON.parse(client.weekly_checkins_history)
+                                    : client.weekly_checkins_history;
+                                  return Array.isArray(data) ? data : [];
+                                } catch { return []; }
+                              })().map((count, wi) => (
                                 <div
                                   key={wi}
                                   className="bg-purple-400 rounded-sm flex-1"

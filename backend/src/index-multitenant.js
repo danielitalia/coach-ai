@@ -2275,7 +2275,8 @@ app.get('/api/brain/clients', legacyTenant, async (req, res) => {
 // Brain: Clienti a rischio
 app.get('/api/brain/at-risk', legacyTenant, async (req, res) => {
   try {
-    const minRisk = parseFloat(req.query.minRisk) || 0.6;
+    const raw = parseFloat(req.query.minRisk);
+    const minRisk = (!isNaN(raw) && raw >= 0 && raw <= 1) ? raw : 0.6;
     const clients = await brain.scoring.getAtRiskClients(req.tenant.id, db, minRisk);
     res.json(clients);
   } catch (error) {

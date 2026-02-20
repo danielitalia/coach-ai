@@ -148,7 +148,6 @@ async function decideAction(tenant, client, db) {
   // ===== REGOLA 4: Cliente attivo + buona consistenza → check progress =====
   if (engagementScore >= 0.6 && consistencyScore >= 0.5 && (parseInt(client.total_checkins_30d) || 0) >= 8) {
     // Controlla se non abbiamo già chiesto feedback negli ultimi 14 giorni
-    const actionKey = `progress:${client.phone}`;
     const recentCheck = await db.pool.query(`
       SELECT id FROM brain_actions
       WHERE tenant_id = $1 AND phone = $2 AND action_type = 'check_progress'
@@ -156,10 +155,11 @@ async function decideAction(tenant, client, db) {
     `, [tenant.id, client.phone]);
 
     if (recentCheck.rows.length === 0) {
+      const actionKey = `progress:${client.phone}:${today}`;
       return {
         action_type: 'check_progress',
         reason: `engagement=${engagementScore}, consistency=${consistencyScore}, ${client.total_checkins_30d} checkins/30d`,
-        action_key: `progress:${client.phone}:${today}`,
+        action_key: actionKey,
         aiPrompt: buildAIPrompt('progress', tenant, client)
       };
     }
@@ -320,9 +320,19 @@ async function executeAction(tenant, client, action, db, sendWhatsAppMessage) {
     ]);
 
     // 3. Invia su WhatsApp
-    await sendWhatsAppMessage(tenant.whatsapp_instance_name, client.phone, messageContent);
+    try {
+      await sendWhatsAppMessage(tenant.whatsapp_instance_name, client.phone, messageContent);
+    } catch (sendErr) {
+      // Invio fallito — segna come failed, NON salvare come messaggio
+      console.error(`[Brain:Actions] ❌ Invio WhatsApp fallito per ${client.phone}:`, sendErr.message);
+      await db.pool.query(`
+        UPDATE brain_actions SET status = 'failed', skip_reason = $3
+        WHERE action_key = $1 AND tenant_id = $2
+      `, [action.action_key, tenant.id, sendErr.message]).catch(e => console.error('[Brain:Actions] DB update error:', e.message));
+      return false;
+    }
 
-    // 4. Aggiorna stato a 'sent'
+    // 4. Aggiorna stato a 'sent' (solo se invio riuscito)
     await db.pool.query(`
       UPDATE brain_actions SET status = 'sent', sent_at = NOW()
       WHERE action_key = $1 AND tenant_id = $2
@@ -346,9 +356,9 @@ async function executeAction(tenant, client, action, db, sendWhatsAppMessage) {
 
     // Log fallimento
     await db.pool.query(`
-      UPDATE brain_actions SET status = 'failed'
+      UPDATE brain_actions SET status = 'failed', skip_reason = $3
       WHERE action_key = $1 AND tenant_id = $2
-    `, [action.action_key, tenant.id]).catch(() => {});
+    `, [action.action_key, tenant.id, error.message]).catch(e => console.error('[Brain:Actions] DB update error:', e.message));
 
     return false;
   }
