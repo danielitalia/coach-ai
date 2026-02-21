@@ -439,7 +439,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPageWrapper />} />
           <Route path="/register" element={<RegisterPageWrapper />} />
-          <Route path="/superadmin" element={<SuperAdmin />} />
+          <Route path="/superadmin" element={<ProtectedRoute><SuperAdmin /></ProtectedRoute>} />
           <Route path="/onboarding/:token" element={<OnboardingWizard />} />
           <Route path="/*" element={<RootRoute />} />
         </Routes>
