@@ -3,10 +3,12 @@ import {
   MessageCircle, RefreshCw, Power, PowerOff, CheckCircle,
   AlertCircle, Loader2, Smartphone, QrCode, User, Phone
 } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 
-const API_URL = ''
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function WhatsAppConnect() {
+  const { authFetch } = useAuth()
   const [status, setStatus] = useState({ connected: false, state: 'unknown' })
   const [qrCode, setQrCode] = useState(null)
   const [info, setInfo] = useState(null)
@@ -16,7 +18,7 @@ function WhatsAppConnect() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/whatsapp/status`)
+      const res = await authFetch(`${API_URL}/api/whatsapp/status`)
       if (res.ok) {
         const data = await res.json()
         setStatus(data)
@@ -26,11 +28,11 @@ function WhatsAppConnect() {
       console.error('Errore fetch status:', err)
     }
     return false
-  }, [])
+  }, [authFetch])
 
   const fetchInfo = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/whatsapp/info`)
+      const res = await authFetch(`${API_URL}/api/whatsapp/info`)
       if (res.ok) {
         const data = await res.json()
         setInfo(data)
@@ -38,13 +40,14 @@ function WhatsAppConnect() {
     } catch (err) {
       console.error('Errore fetch info:', err)
     }
-  }, [])
+  }, [authFetch])
 
   const fetchQrCode = useCallback(async () => {
     try {
-      setError(null)
-      const res = await fetch(`${API_URL}/api/whatsapp/qrcode`)
+      // Non resettiamo l'errore se stiamo riprovando silenziosamente
+      const res = await authFetch(`${API_URL}/api/whatsapp/qrcode`)
       if (res.ok) {
+        setError(null)
         const data = await res.json()
         if (data.connected) {
           setQrCode(null)
@@ -52,19 +55,25 @@ function WhatsAppConnect() {
         } else if (data.qrcode) {
           setQrCode(data.qrcode)
         }
+      } else if (res.status === 404) {
+        // Evolution API is slow, it will be ready soon. Do not throw hard error.
+        console.warn('QR code non ancora pronto, riprovo al prossimo ciclo...')
+      } else {
+        setError('Errore nel recupero del QR code')
       }
     } catch (err) {
       console.error('Errore fetch QR:', err)
-      setError('Errore nel recupero del QR code')
+      // Se è un errore di rete temporaneo (es. cambio wifi) non blocchiamo tutto
+      // setError('Errore nel recupero del QR code')
     }
-  }, [])
+  }, [authFetch])
 
   const handleDisconnect = async () => {
     if (!confirm('Sei sicuro di voler disconnettere WhatsApp?')) return
 
     setActionLoading(true)
     try {
-      const res = await fetch(`${API_URL}/api/whatsapp/disconnect`, { method: 'POST' })
+      const res = await authFetch(`${API_URL}/api/whatsapp/disconnect`, { method: 'POST' })
       if (res.ok) {
         setStatus({ connected: false, state: 'close' })
         setQrCode(null)
@@ -82,7 +91,7 @@ function WhatsAppConnect() {
   const handleRefreshQr = async () => {
     setActionLoading(true)
     try {
-      const res = await fetch(`${API_URL}/api/whatsapp/restart`, { method: 'POST' })
+      const res = await authFetch(`${API_URL}/api/whatsapp/restart`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
         if (data.qrcode) {
@@ -128,10 +137,12 @@ function WhatsAppConnect() {
     }
   }, [status.connected, qrCode, fetchStatus, fetchInfo])
 
-  // Refresh QR code every 45 seconds if not connected
+  // Polling intelligente: Refresh QR code ogni 5 sec se non caricato, ogni 45 sec se caricato
   useEffect(() => {
-    if (!status.connected && qrCode) {
-      const interval = setInterval(fetchQrCode, 45000)
+    if (!status.connected) {
+      // Se non abbiamo ancora il QR, riproviamo ogni 5 secondi, altrimenti ogni 45s (scadenza di WA)
+      const waitTime = qrCode ? 45000 : 5000
+      const interval = setInterval(fetchQrCode, waitTime)
       return () => clearInterval(interval)
     }
   }, [status.connected, qrCode, fetchQrCode])
@@ -164,12 +175,10 @@ function WhatsAppConnect() {
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-              status.connected ? 'bg-green-100' : 'bg-gray-100'
-            }`}>
-              <MessageCircle className={`w-6 h-6 ${
-                status.connected ? 'text-green-600' : 'text-gray-400'
-              }`} />
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${status.connected ? 'bg-green-100' : 'bg-gray-100'
+              }`}>
+              <MessageCircle className={`w-6 h-6 ${status.connected ? 'text-green-600' : 'text-gray-400'
+                }`} />
             </div>
             <div>
               <h3 className="font-semibold text-gray-900">
