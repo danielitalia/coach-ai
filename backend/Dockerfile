@@ -2,6 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Install postgresql-client for pg_dump and gzip for database backups
+RUN apk add --no-cache postgresql-client gzip
+
 # Copy package files
 COPY package*.json ./
 
