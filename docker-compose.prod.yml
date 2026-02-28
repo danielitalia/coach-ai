@@ -24,7 +24,7 @@ services:
 
   # Evolution API - WhatsApp Gateway
   evolution-api:
-    image: atendai/evolution-api:v2.1.1
+    image: atendai/evolution-api:v2.3.7
     restart: always
     environment:
       - SERVER_URL=${SERVER_URL:?Server URL required}
