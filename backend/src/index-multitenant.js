@@ -2491,11 +2491,21 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
       // Se Evolution API ha risposto con { count: 0 } e nessun QR o QR non pronto
       if (!qrcode) {
         console.log(`[QR Legacy] Istanza ${instanceName} non restituisce QR (forse count: 0), forzo eliminazione e ricreazione...`);
+        // Disconnetti prima
+        await axios.delete(
+          `${EVOLUTION_API_URL}/instance/logout/${instanceName}`,
+          { headers: { 'apikey': EVOLUTION_API_KEY } }
+        ).catch(() => null);
+
+        await new Promise(r => setTimeout(r, 1000));
+
         // Forziamo l'eliminazione per avere un QR pulito da instance/create
         await axios.delete(
           `${EVOLUTION_API_URL}/instance/delete/${instanceName}`,
           { headers: { 'apikey': EVOLUTION_API_KEY } }
         ).catch(() => null); // Ignoriamo se l'eliminazione fallisce
+
+        await new Promise(r => setTimeout(r, 2000));
         throw new Error("Forziamo la catch per ricreare");
       }
     } catch (e) {
