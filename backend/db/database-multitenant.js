@@ -158,7 +158,7 @@ async function getUserByEmail(email) {
 
 async function getUserById(userId) {
   const result = await pool.query(
-    'SELECT id, email, name, avatar_url, email_verified, created_at FROM users WHERE id = $1',
+    'SELECT id, email, name, avatar_url, email_verified, is_superadmin, created_at FROM users WHERE id = $1',
     [userId]
   );
   return result.rows[0] || null;
@@ -289,10 +289,16 @@ async function getClient(tenantId, phone) {
 }
 
 async function getAllClients(tenantId) {
-  const result = await pool.query(
-    'SELECT * FROM clients WHERE tenant_id = $1 ORDER BY last_activity DESC',
-    [tenantId]
-  );
+  const result = await pool.query(`
+    SELECT c.*, 
+           cs.churn_risk, 
+           cs.days_since_last_checkin,
+           cs.checkin_trend
+    FROM clients c
+    LEFT JOIN client_scoring cs ON cs.tenant_id = c.tenant_id AND cs.phone = c.phone
+    WHERE c.tenant_id = $1 
+    ORDER BY c.last_activity DESC
+  `, [tenantId]);
   return result.rows;
 }
 
@@ -600,32 +606,68 @@ async function getAllCheckinsToday(tenantId) {
 // ========== REFERRALS (con tenant) ==========
 
 function generateReferralCode(phone) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const numbers = '23456789';
   let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+
+  // Assicura almeno 2 lettere e 2 numeri tra i primi 6 caratteri
+  for (let i = 0; i < 2; i++) {
+    code += letters.charAt(Math.floor(Math.random() * letters.length));
+    code += numbers.charAt(Math.floor(Math.random() * numbers.length));
   }
-  return code + phone.slice(-3);
+
+  // Altri 2 caratteri casuali (totale 6)
+  const all = letters + numbers;
+  for (let i = 0; i < 2; i++) {
+    code += all.charAt(Math.floor(Math.random() * all.length));
+  }
+
+  // Shuffle dei primi 6 caratteri
+  code = code.split('').sort(() => Math.random() - 0.5).join('');
+
+  // Aggiunge le ultime 3 cifre del numero (totale 9)
+  return code + phone.replace(/\D/g, '').slice(-3);
 }
 
 async function createReferralCode(tenantId, phone) {
-  const existing = await pool.query(
-    'SELECT referral_code FROM referrals WHERE tenant_id = $1 AND referrer_phone = $2 AND referred_phone IS NULL LIMIT 1',
-    [tenantId, phone]
-  );
+  try {
+    const cleanPhone = phone.replace(/\D/g, '');
 
-  if (existing.rows[0]) {
-    return existing.rows[0].referral_code;
+    // Verifica se esiste già un codice NON ancora convertito (referred_phone IS NULL)
+    const existing = await pool.query(
+      'SELECT referral_code FROM referrals WHERE tenant_id = $1 AND referrer_phone = $2 AND referred_phone IS NULL LIMIT 1',
+      [tenantId, cleanPhone]
+    );
+
+    if (existing.rows[0]) {
+      return existing.rows[0].referral_code;
+    }
+
+    // Tenta di generare un codice unico (max 5 tentativi in caso di collisione globale)
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = generateReferralCode(cleanPhone);
+      try {
+        await pool.query(`
+          INSERT INTO referrals (tenant_id, referrer_phone, referral_code)
+          VALUES ($1, $2, $3)
+        `, [tenantId, cleanPhone, code]);
+
+        console.log(`[Referral] Creato nuovo codice per ${cleanPhone}: ${code}`);
+        return code;
+      } catch (err) {
+        if (err.code === '23505') { // Unique violation
+          console.log(`[Referral] Collisione codice ${code}, riprovo...`);
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw new Error('Impossibile generare un codice referral unico dopo 5 tentativi');
+  } catch (error) {
+    console.error('[DB Error] createReferralCode:', error);
+    throw error;
   }
-
-  const code = generateReferralCode(phone);
-  await pool.query(`
-    INSERT INTO referrals (tenant_id, referrer_phone, referral_code)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (referral_code) DO NOTHING
-  `, [tenantId, phone, code]);
-
-  return code;
 }
 
 async function getReferralByCode(tenantId, code) {
@@ -637,17 +679,23 @@ async function getReferralByCode(tenantId, code) {
 }
 
 async function useReferralCode(tenantId, code, referredPhone) {
-  const referral = await getReferralByCode(tenantId, code);
+  const cleanCode = code.toUpperCase();
+  const cleanPhone = referredPhone.replace(/\D/g, '');
+
+  const referral = await getReferralByCode(tenantId, cleanCode);
 
   if (!referral) {
+    console.warn(`[Referral] Codice ${cleanCode} non trovato per tenant ${tenantId}`);
     return { success: false, error: 'Codice non valido' };
   }
 
   if (referral.referred_phone) {
+    console.warn(`[Referral] Codice ${cleanCode} già utilizzato da ${referral.referred_phone}`);
     return { success: false, error: 'Codice già utilizzato' };
   }
 
-  if (referral.referrer_phone === referredPhone) {
+  if (referral.referrer_phone === cleanPhone) {
+    console.warn(`[Referral] Utente ${cleanPhone} ha tentato di usare il proprio codice ${cleanCode}`);
     return { success: false, error: 'Non puoi usare il tuo stesso codice!' };
   }
 
@@ -655,8 +703,9 @@ async function useReferralCode(tenantId, code, referredPhone) {
     UPDATE referrals
     SET referred_phone = $1, status = 'registered', converted_at = CURRENT_TIMESTAMP
     WHERE tenant_id = $2 AND referral_code = $3
-  `, [referredPhone, tenantId, code.toUpperCase()]);
+  `, [cleanPhone, tenantId, cleanCode]);
 
+  console.log(`[Referral] Codice ${cleanCode} registrato correttamente per ${cleanPhone} (invitato da ${referral.referrer_phone})`);
   return { success: true, referrerPhone: referral.referrer_phone };
 }
 

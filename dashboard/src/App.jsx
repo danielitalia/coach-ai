@@ -24,6 +24,7 @@ import SuperAdmin from './components/SuperAdmin'
 import OnboardingWizard from './components/OnboardingWizard'
 import BrainInsights from './components/BrainInsights'
 import LandingPage from './components/LandingPage'
+import ChurnAlert from './components/ChurnAlert'
 
 // Protected Route component
 function ProtectedRoute({ children }) {
@@ -121,22 +122,19 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
           <Link
             to="/whatsapp"
             onClick={() => setIsOpen(false)}
-            className={`flex items-center gap-3 px-4 py-3 rounded-lg ${
-              whatsappStatus?.connected
-                ? 'bg-green-50 hover:bg-green-100'
-                : 'bg-orange-50 hover:bg-orange-100'
-            } transition-colors`}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg ${whatsappStatus?.connected
+              ? 'bg-green-50 hover:bg-green-100'
+              : 'bg-orange-50 hover:bg-orange-100'
+              } transition-colors`}
           >
-            <div className={`w-2 h-2 rounded-full ${
-              whatsappStatus?.connected
-                ? 'bg-green-500 animate-pulse'
-                : 'bg-orange-500'
-            }`} />
-            <span className={`text-sm font-medium ${
-              whatsappStatus?.connected
-                ? 'text-green-700'
-                : 'text-orange-700'
-            }`}>
+            <div className={`w-2 h-2 rounded-full ${whatsappStatus?.connected
+              ? 'bg-green-500 animate-pulse'
+              : 'bg-orange-500'
+              }`} />
+            <span className={`text-sm font-medium ${whatsappStatus?.connected
+              ? 'text-green-700'
+              : 'text-orange-700'
+              }`}>
               {whatsappStatus?.connected ? 'WhatsApp Connesso' : 'Connetti WhatsApp'}
             </span>
           </Link>
@@ -223,6 +221,9 @@ function Dashboard() {
         <h2 className="text-2xl font-bold text-gray-900">Dashboard</h2>
         <p className="text-gray-500">Panoramica delle attivita di {tenant?.name || 'Coach AI'}</p>
       </div>
+
+      {/* AI Churn Prediction Alert */}
+      <ChurnAlert />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -337,6 +338,8 @@ function formatTime(date) {
   return d.toLocaleDateString('it-IT')
 }
 
+import ReloadPrompt from './components/ReloadPrompt'
+
 function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [whatsappStatus, setWhatsappStatus] = useState({ connected: false })
@@ -399,6 +402,7 @@ function MainLayout() {
           </Routes>
         </main>
       </div>
+      <ReloadPrompt />
     </div>
   )
 }

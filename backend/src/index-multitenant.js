@@ -1439,7 +1439,11 @@ app.get('/api/clients', legacyTenant, async (req, res) => {
       experience: c.experience,
       daysPerWeek: c.days_per_week,
       lastContact: c.last_activity,
-      createdAt: c.created_at
+      createdAt: c.created_at,
+      // Nuovi metadati AI Churn
+      churnRisk: c.churn_risk || null,
+      daysSinceLastCheckin: c.days_since_last_checkin !== null ? c.days_since_last_checkin : null,
+      checkinTrend: c.checkin_trend || null
     })));
   } catch (error) {
     console.error('Errore clients:', error);
@@ -1482,6 +1486,71 @@ app.post('/api/clients', legacyTenant, async (req, res) => {
     });
   } catch (error) {
     console.error('Errore creazione cliente:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Re-engage cliente inattivo (tramite AI)
+app.post('/api/brain/reengage/:phone', legacyTenant, async (req, res) => {
+  try {
+    const { phone } = req.params;
+    const client = await db.getClient(req.tenantId, phone);
+    const tenant = await db.getTenant(req.tenantId);
+
+    if (!client) {
+      return res.status(404).json({ error: 'Cliente non trovato' });
+    }
+
+    const { name, objective, days_per_week } = client;
+    const coachName = tenant?.coach_name || 'il team';
+    const gymName = tenant?.name || 'la palestra';
+
+    // Genera messaggio AI
+    const prompt = `Sei ${coachName}, personal trainer di ${gymName}.
+Il tuo cliente ${name || 'Amico'} (obiettivo: ${objective || 'rimettersi in forma'}) non viene in palestra da molti giorni.
+Scrivi un SINGOLO MESSAGGIO WhatsApp (massimo 2-3 frasi) amichevole ed empatico per sapere come sta e invitarlo a tornare ad allenarsi. 
+Non essere aggressivo né invadente. Usa 1-2 emoji al massimo. Sii incoraggiante!
+RISPONDI SOLO CON IL MESSAGGIO CHE INVIERESTI A LUI.`;
+
+    let generatedMessage = "Ciao! È da un po' che non ci vediamo in palestra 💪 Tutto bene? Ti aspettiamo per riprendere gli allenamenti!";
+
+    try {
+      if (useAnthropic) {
+        const completion = await aiClient.messages.create({
+          model: AI_MODEL || 'claude-3-haiku-20240307',
+          max_tokens: 150,
+          messages: [{ role: 'user', content: prompt }]
+        });
+        generatedMessage = completion.content[0].text;
+      } else {
+        const completion = await aiClient.chat.completions.create({
+          model: AI_MODEL || 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 150,
+          temperature: 0.7
+        });
+        generatedMessage = completion.choices[0].message.content;
+      }
+    } catch (aiError) {
+      console.error('[Reengage AI] Errore generazione AI, uso fallback:', aiError.message);
+    }
+
+    // Aggiungi asincronamente alla coda senza bloccare Node.js
+    await enqueueWhatsAppMessage(
+      req.tenantId,
+      tenant.whatsapp_instance_name,
+      client.phone,
+      generatedMessage
+    );
+
+    // Salva nello storico messaggi come assistente
+    await db.addMessage(req.tenantId, client.phone, 'assistant', generatedMessage, {
+      isReminder: true
+    });
+
+    res.json({ success: true, message: 'Messaggio AI generato e accodato per l\'invio', generatedMessage });
+  } catch (error) {
+    console.error('Errore re-engage AI:', error);
     res.status(500).json({ error: error.message });
   }
 });
