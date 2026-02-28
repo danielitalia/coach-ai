@@ -2500,23 +2500,23 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
 
       // Se Evolution API ha risposto con { count: 0 } e nessun QR o QR non pronto
       if (!qrcode) {
-        console.log(`[QR Legacy] Istanza ${instanceName} non restituisce QR (forse count: 0), forzo eliminazione e ricreazione...`);
+        console.log(`[QR Legacy] Istanza ${instanceName} non restituisce QR (forse count: 0), ma non forzo l'eliminazione per dare tempo ad Evolution API di completare la generazione.`);
         // Disconnetti prima
-        await axios.delete(
-          `${EVOLUTION_API_URL}/instance/logout/${instanceName}`,
-          { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 10000 }
-        ).catch(() => null);
+        // await axios.delete(
+        //   `${EVOLUTION_API_URL}/instance/logout/${instanceName}`,
+        //   { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 10000 }
+        // ).catch(() => null);
 
-        await new Promise(r => setTimeout(r, 1000));
+        // await new Promise(r => setTimeout(r, 1000));
 
         // Forziamo l'eliminazione per avere un QR pulito da instance/create
-        await axios.delete(
-          `${EVOLUTION_API_URL}/instance/delete/${instanceName}`,
-          { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 15000 }
-        ).catch(() => null); // Ignoriamo se l'eliminazione fallisce
+        // await axios.delete(
+        //   `${EVOLUTION_API_URL}/instance/delete/${instanceName}`,
+        //   { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 15000 }
+        // ).catch(() => null); // Ignoriamo se l'eliminazione fallisce
 
-        await new Promise(r => setTimeout(r, 2000));
-        throw new Error("Forziamo la catch per ricreare");
+        // await new Promise(r => setTimeout(r, 2000));
+        // throw new Error("Forziamo la catch per ricreare");
       }
     } catch (e) {
       console.log(`[QR Legacy] Impossibile ottenere QR da ${instanceName} o non esiste, procedo con creazione...`);
