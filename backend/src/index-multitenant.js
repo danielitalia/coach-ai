@@ -2451,11 +2451,21 @@ app.get('/api/whatsapp/info', legacyTenant, async (req, res) => {
   }
 });
 
+// Lock globale per generazione QR
+const qrGenerationLocks = new Map();
+
 // WhatsApp QR code alias
 app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
+  const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
+
+  if (qrGenerationLocks.get(instanceName)) {
+    console.log(`[QR Legacy] Istanza ${instanceName} è già in elaborazione (cooldown), ignoro chiamata multipla.`);
+    return res.status(404).json({ error: 'Elaborazione in corso...' });
+  }
+
   try {
-    const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
     console.log(`[QR Legacy] Richiesta QR per istanza: ${instanceName}`);
+    qrGenerationLocks.set(instanceName, true);
 
     // Prima verifica se già connesso
     try {
@@ -2555,6 +2565,8 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
   } catch (error) {
     console.error('WhatsApp QR error:', error.response?.data || error.message);
     res.status(500).json({ error: error.response?.data?.message || error.message });
+  } finally {
+    qrGenerationLocks.delete(instanceName);
   }
 });
 
