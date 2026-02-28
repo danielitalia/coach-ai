@@ -77,7 +77,21 @@ export default function ChurnAlert() {
     }
 
     if (atRiskClients.length === 0) {
-        return null; // Don't show anything if no one is at risk
+        return (
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-6 mb-6 shadow-sm flex items-center gap-4">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <CheckCircle2 className="w-6 h-6 text-green-600" />
+                </div>
+                <div>
+                    <h3 className="text-xl font-bold text-green-900">
+                        Nessun cliente a rischio! 🎉
+                    </h3>
+                    <p className="text-green-700 text-sm mt-1">
+                        Ottimo lavoro. Tutti i tuoi clienti si stanno allenando regolarmente e nessuno manca da più di 14 giorni.
+                    </p>
+                </div>
+            </div>
+        );
     }
 
     return (
@@ -134,8 +148,8 @@ export default function ChurnAlert() {
                                         onClick={() => handleReengage(client.phone)}
                                         disabled={isActioning}
                                         className={`w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg font-medium text-sm transition-all ${isActioning
-                                                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                                : 'bg-red-600 hover:bg-red-700 text-white shadow-sm hover:shadow-md'
+                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            : 'bg-red-600 hover:bg-red-700 text-white shadow-sm hover:shadow-md'
                                             }`}
                                     >
                                         {isActioning ? (
