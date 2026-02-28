@@ -18,6 +18,7 @@ const { requireAuth, requireSuperadmin, requireTenant, identifyTenantFromWhatsAp
 
 // Marketing Automation
 const automation = require('./automation');
+const { renderTemplate, getDefaultVariables } = require('./automation/templates');
 
 // Brain AI - Sistema Intelligente
 const brain = require('./brain');
@@ -466,23 +467,23 @@ async function generateWorkoutPDF(tenant, client, workoutData) {
       doc.rect(0, 0, doc.page.width, 120).fill(primaryColor);
 
       doc.fillColor('white')
-         .fontSize(28)
-         .font('Helvetica-Bold')
-         .text(tenant?.name || 'COACH AI', 50, 40);
+        .fontSize(28)
+        .font('Helvetica-Bold')
+        .text(tenant?.name || 'COACH AI', 50, 40);
 
       doc.fontSize(12)
-         .font('Helvetica')
-         .text('Scheda di Allenamento Personalizzata', 50, 75);
+        .font('Helvetica')
+        .text('Scheda di Allenamento Personalizzata', 50, 75);
 
       // === INFO CLIENTE ===
       doc.fillColor('#1e293b')
-         .fontSize(18)
-         .font('Helvetica-Bold')
-         .text(clientName, 50, 150);
+        .fontSize(18)
+        .font('Helvetica-Bold')
+        .text(clientName, 50, 150);
 
       doc.fontSize(11)
-         .fillColor(secondaryColor)
-         .font('Helvetica');
+        .fillColor(secondaryColor)
+        .font('Helvetica');
 
       const infoY = 175;
       const col1 = 50;
@@ -514,16 +515,16 @@ async function generateWorkoutPDF(tenant, client, workoutData) {
         // Titolo giorno
         doc.rect(50, yPos, 495, 30).fill(primaryColor);
         doc.fillColor('white')
-           .fontSize(13)
-           .font('Helvetica-Bold')
-           .text(workout.day.toUpperCase(), 60, yPos + 9);
+          .fontSize(13)
+          .font('Helvetica-Bold')
+          .text(workout.day.toUpperCase(), 60, yPos + 9);
 
         yPos += 45;
 
         // Header tabella
         doc.fillColor(secondaryColor)
-           .fontSize(9)
-           .font('Helvetica-Bold');
+          .fontSize(9)
+          .font('Helvetica-Bold');
         doc.text('ESERCIZIO', 55, yPos);
         doc.text('SERIE', 320, yPos);
         doc.text('RIPETIZIONI', 380, yPos);
@@ -565,9 +566,9 @@ async function generateWorkoutPDF(tenant, client, workoutData) {
       doc.moveTo(50, footerY).lineTo(545, footerY).strokeColor('#e2e8f0').lineWidth(1).stroke();
 
       doc.fillColor(secondaryColor)
-         .fontSize(9)
-         .font('Helvetica')
-         .text(`Generato da ${tenant.coach_name || 'Coach AI'} - ${tenant.name || 'La tua palestra'}`, 50, footerY + 15);
+        .fontSize(9)
+        .font('Helvetica')
+        .text(`Generato da ${tenant.coach_name || 'Coach AI'} - ${tenant.name || 'La tua palestra'}`, 50, footerY + 15);
       doc.text('Buon allenamento! 💪', 450, footerY + 15);
 
       // === NOTE FINALI ===
@@ -575,12 +576,12 @@ async function generateWorkoutPDF(tenant, client, workoutData) {
         yPos += 10;
         doc.rect(50, yPos, 495, 60).fill('#f0fdf4').stroke('#10b981');
         doc.fillColor('#166534')
-           .fontSize(10)
-           .font('Helvetica-Bold')
-           .text('💡 Consigli:', 60, yPos + 10);
+          .fontSize(10)
+          .font('Helvetica-Bold')
+          .text('💡 Consigli:', 60, yPos + 10);
         doc.font('Helvetica')
-           .fontSize(9)
-           .text('• Esegui sempre 5-10 minuti di riscaldamento prima di iniziare', 60, yPos + 25);
+          .fontSize(9)
+          .text('• Esegui sempre 5-10 minuti di riscaldamento prima di iniziare', 60, yPos + 25);
         doc.text('• Mantieni una corretta idratazione durante l\'allenamento', 60, yPos + 37);
         doc.text('• Se hai dubbi su un esercizio, chiedi al tuo Coach AI!', 60, yPos + 49);
       }
@@ -636,11 +637,11 @@ function extractWorkoutFromAIResponse(aiResponse) {
 
         // Evita duplicati e nomi troppo lunghi/invalidi
         if (name && sets && reps &&
-            name.length > 2 && name.length < 50 &&
-            !exercises.find(e => e.name.toLowerCase() === name.toLowerCase()) &&
-            !name.toLowerCase().includes('riscaldamento') &&
-            !name.toLowerCase().includes('defaticamento') &&
-            !name.toLowerCase().includes('stretching')) {
+          name.length > 2 && name.length < 50 &&
+          !exercises.find(e => e.name.toLowerCase() === name.toLowerCase()) &&
+          !name.toLowerCase().includes('riscaldamento') &&
+          !name.toLowerCase().includes('defaticamento') &&
+          !name.toLowerCase().includes('stretching')) {
           exercises.push({ name, sets, reps, rest });
         }
       }
@@ -706,8 +707,8 @@ app.post('/webhook', identifyTenantFromWhatsApp, async (req, res) => {
         }
 
         const text = messageContent.conversation ||
-                     messageContent.extendedTextMessage?.text ||
-                     msgData.body || '';
+          messageContent.extendedTextMessage?.text ||
+          msgData.body || '';
 
         if (!text || !phoneNumber) continue;
 
@@ -723,12 +724,11 @@ app.post('/webhook', identifyTenantFromWhatsApp, async (req, res) => {
         const referralKeywords = ['invita', 'porta un amico', 'referral', 'codice amico', 'invita amico'];
         const isReferralRequest = referralKeywords.some(keyword => text.toLowerCase().includes(keyword));
 
-        // Codice referral: esattamente 9 caratteri alfanumerici che contengono SIA lettere CHE numeri
         const referralCodeMatch = text.toUpperCase().match(/\b([A-Z0-9]{9})\b/);
         const hasLettersAndNumbers = referralCodeMatch &&
           /[A-Z]/.test(referralCodeMatch[1]) &&
           /[0-9]/.test(referralCodeMatch[1]);
-        const isUsingReferralCode = hasLettersAndNumbers && !isReferralRequest;
+        const isUsingReferralCode = hasLettersAndNumbers;
 
         const rewardKeywords = ['premi', 'rewards', 'i miei premi', 'miei premi', 'bonus'];
         const isRewardRequest = rewardKeywords.some(keyword => text.toLowerCase().includes(keyword));
@@ -736,10 +736,10 @@ app.post('/webhook', identifyTenantFromWhatsApp, async (req, res) => {
         let response;
         if (isCheckin) {
           response = await processCheckin(tenantId, tenant, phoneNumber);
-        } else if (isReferralRequest) {
-          response = await processReferralRequest(tenantId, phoneNumber);
         } else if (isUsingReferralCode) {
           response = await processReferralCode(tenantId, phoneNumber, referralCodeMatch[1]);
+        } else if (isReferralRequest) {
+          response = await processReferralRequest(tenantId, phoneNumber);
         } else if (isRewardRequest) {
           response = await processRewardRequest(tenantId, phoneNumber);
         } else {
@@ -931,8 +931,13 @@ async function processCheckin(tenantId, tenant, phoneNumber) {
 
     await db.addCheckin(tenantId, phoneNumber, workoutDay);
 
-    // Aggiorna contatore check-in nel profilo memoria
+    // Aggiorna contatore check-in nel profilo memoria e ricalcola scoring Brain AI
     await db.incrementClientProfileStats(tenantId, phoneNumber, 'total_checkins');
+    try {
+      await brain.scoring.scoreClient(tenantId, phoneNumber, db);
+    } catch (brainErr) {
+      console.error('[Brain] Errore scoring immediato post-checkin:', brainErr.message);
+    }
 
     // Completa referral se primo check-in
     const checkinStats = await db.getCheckinStats(tenantId, phoneNumber);
@@ -954,6 +959,15 @@ async function processCheckin(tenantId, tenant, phoneNumber) {
     const stats = await db.getCheckinStats(tenantId, phoneNumber);
     const streak = await db.getCheckinStreak(tenantId, phoneNumber);
     const thisMonth = parseInt(stats?.this_month) || 1;
+    const totalCheckins = parseInt(stats?.total_checkins) || 1;
+
+    // Sistema Loyalty: Premio ogni 10 check-in
+    let loyaltyBonus = '';
+    if (totalCheckins > 0 && totalCheckins % 10 === 0) {
+      const rewardDesc = `Premio Fedeltà - Hai raggiunto ${totalCheckins} allenamenti! 🏆`;
+      await db.createReward(tenantId, phoneNumber, 'loyalty_bonus', rewardDesc);
+      loyaltyBonus = `\n\n⭐ *TRAGUARDO RAGGIUNTO!*\nComplimenti! Questo è il tuo ${totalCheckins}° allenamento.\nHai sbloccato un premio fedeltà! 🎉\nScrivi "premi" per vederlo.`;
+    }
 
     let message = `*Check-in registrato!* ✅\n\n`;
     message += `Ciao ${clientName}! 💪\n`;
@@ -961,7 +975,8 @@ async function processCheckin(tenantId, tenant, phoneNumber) {
     if (streak > 1) {
       message += `🔥 Streak: ${streak} giorni consecutivi!\n`;
     }
-    message += `📊 Allenamenti questo mese: ${thisMonth}\n`;
+    message += `📊 Allenamenti totali: ${totalCheckins}\n`;
+    message += `📅 Questo mese: ${thisMonth}\n`;
 
     if (workoutMessage) {
       message += workoutMessage;
@@ -970,6 +985,7 @@ async function processCheckin(tenantId, tenant, phoneNumber) {
     }
 
     message += referralBonus;
+    message += loyaltyBonus;
     message += `\n\n*Buon allenamento!* 🏋️`;
 
     await db.addMessage(tenantId, phoneNumber, 'user', 'check-in');
@@ -1064,7 +1080,11 @@ async function processRewardRequest(tenantId, phoneNumber) {
     } else {
       message += `*Premi disponibili:*\n`;
       rewards.forEach((reward) => {
-        const emoji = reward.reward_type === 'free_week' ? '🎫' : '🎁';
+        let emoji = '🎁';
+        if (reward.reward_type === 'free_week') emoji = '🎫';
+        if (reward.reward_type === 'loyalty_bonus') emoji = '⭐';
+        if (reward.reward_type === 'welcome_bonus') emoji = '🎉';
+
         message += `${emoji} ${reward.description}\n`;
         if (reward.expires_at) {
           const expiresDate = new Date(reward.expires_at).toLocaleDateString('it-IT');
@@ -1250,44 +1270,44 @@ const exerciseDatabase = {
 const workoutTemplates = {
   'dimagrire': {
     2: [{ day: 'Giorno 1 - Full Body + Cardio', muscles: ['legs', 'chest', 'back', 'core', 'cardio'] },
-        { day: 'Giorno 2 - Full Body + Cardio', muscles: ['legs', 'shoulders', 'arms', 'core', 'cardio'] }],
+    { day: 'Giorno 2 - Full Body + Cardio', muscles: ['legs', 'shoulders', 'arms', 'core', 'cardio'] }],
     3: [{ day: 'Giorno 1 - Gambe + Cardio', muscles: ['legs', 'core', 'cardio'] },
-        { day: 'Giorno 2 - Petto/Spalle + Cardio', muscles: ['chest', 'shoulders', 'core', 'cardio'] },
-        { day: 'Giorno 3 - Schiena/Braccia + Cardio', muscles: ['back', 'arms', 'core', 'cardio'] }],
+    { day: 'Giorno 2 - Petto/Spalle + Cardio', muscles: ['chest', 'shoulders', 'core', 'cardio'] },
+    { day: 'Giorno 3 - Schiena/Braccia + Cardio', muscles: ['back', 'arms', 'core', 'cardio'] }],
     4: [{ day: 'Giorno 1 - Gambe', muscles: ['legs', 'core', 'cardio'] },
-        { day: 'Giorno 2 - Petto/Tricipiti', muscles: ['chest', 'arms', 'cardio'] },
-        { day: 'Giorno 3 - Schiena/Bicipiti', muscles: ['back', 'arms', 'cardio'] },
-        { day: 'Giorno 4 - Spalle/Core', muscles: ['shoulders', 'core', 'cardio'] }]
+    { day: 'Giorno 2 - Petto/Tricipiti', muscles: ['chest', 'arms', 'cardio'] },
+    { day: 'Giorno 3 - Schiena/Bicipiti', muscles: ['back', 'arms', 'cardio'] },
+    { day: 'Giorno 4 - Spalle/Core', muscles: ['shoulders', 'core', 'cardio'] }]
   },
   'massa': {
     3: [{ day: 'Giorno 1 - Petto/Tricipiti', muscles: ['chest', 'arms'] },
-        { day: 'Giorno 2 - Schiena/Bicipiti', muscles: ['back', 'arms'] },
-        { day: 'Giorno 3 - Gambe/Spalle', muscles: ['legs', 'shoulders', 'core'] }],
+    { day: 'Giorno 2 - Schiena/Bicipiti', muscles: ['back', 'arms'] },
+    { day: 'Giorno 3 - Gambe/Spalle', muscles: ['legs', 'shoulders', 'core'] }],
     4: [{ day: 'Giorno 1 - Petto', muscles: ['chest', 'core'] },
-        { day: 'Giorno 2 - Schiena', muscles: ['back', 'core'] },
-        { day: 'Giorno 3 - Gambe', muscles: ['legs'] },
-        { day: 'Giorno 4 - Spalle/Braccia', muscles: ['shoulders', 'arms'] }],
+    { day: 'Giorno 2 - Schiena', muscles: ['back', 'core'] },
+    { day: 'Giorno 3 - Gambe', muscles: ['legs'] },
+    { day: 'Giorno 4 - Spalle/Braccia', muscles: ['shoulders', 'arms'] }],
     5: [{ day: 'Giorno 1 - Petto', muscles: ['chest'] },
-        { day: 'Giorno 2 - Schiena', muscles: ['back'] },
-        { day: 'Giorno 3 - Gambe', muscles: ['legs'] },
-        { day: 'Giorno 4 - Spalle', muscles: ['shoulders', 'core'] },
-        { day: 'Giorno 5 - Braccia', muscles: ['arms', 'core'] }]
+    { day: 'Giorno 2 - Schiena', muscles: ['back'] },
+    { day: 'Giorno 3 - Gambe', muscles: ['legs'] },
+    { day: 'Giorno 4 - Spalle', muscles: ['shoulders', 'core'] },
+    { day: 'Giorno 5 - Braccia', muscles: ['arms', 'core'] }]
   },
   'tonificare': {
     3: [{ day: 'Giorno 1 - Upper Body', muscles: ['chest', 'back', 'shoulders', 'core'] },
-        { day: 'Giorno 2 - Lower Body', muscles: ['legs', 'core'] },
-        { day: 'Giorno 3 - Full Body', muscles: ['chest', 'legs', 'arms', 'core', 'cardio'] }],
+    { day: 'Giorno 2 - Lower Body', muscles: ['legs', 'core'] },
+    { day: 'Giorno 3 - Full Body', muscles: ['chest', 'legs', 'arms', 'core', 'cardio'] }],
     4: [{ day: 'Giorno 1 - Petto/Schiena', muscles: ['chest', 'back', 'core'] },
-        { day: 'Giorno 2 - Gambe', muscles: ['legs', 'core'] },
-        { day: 'Giorno 3 - Spalle/Braccia', muscles: ['shoulders', 'arms'] },
-        { day: 'Giorno 4 - Cardio/Core', muscles: ['core', 'cardio'] }]
+    { day: 'Giorno 2 - Gambe', muscles: ['legs', 'core'] },
+    { day: 'Giorno 3 - Spalle/Braccia', muscles: ['shoulders', 'arms'] },
+    { day: 'Giorno 4 - Cardio/Core', muscles: ['core', 'cardio'] }]
   },
   'salute': {
     2: [{ day: 'Giorno 1 - Full Body A', muscles: ['legs', 'chest', 'back', 'core'] },
-        { day: 'Giorno 2 - Full Body B', muscles: ['legs', 'shoulders', 'arms', 'core', 'cardio'] }],
+    { day: 'Giorno 2 - Full Body B', muscles: ['legs', 'shoulders', 'arms', 'core', 'cardio'] }],
     3: [{ day: 'Giorno 1 - Full Body', muscles: ['legs', 'chest', 'core'] },
-        { day: 'Giorno 2 - Full Body', muscles: ['back', 'shoulders', 'core'] },
-        { day: 'Giorno 3 - Cardio/Core', muscles: ['arms', 'core', 'cardio'] }]
+    { day: 'Giorno 2 - Full Body', muscles: ['back', 'shoulders', 'core'] },
+    { day: 'Giorno 3 - Cardio/Core', muscles: ['arms', 'core', 'cardio'] }]
   }
 };
 
@@ -1361,18 +1381,22 @@ const legacyTenant = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log(`[DEBUG Auth] Token mancante per IP: ${req.ip}, Route: ${req.originalUrl}`);
       return res.status(401).json({ error: 'Token mancante' });
     }
 
     const token = authHeader.split(' ')[1];
     const decoded = verifyToken(token);
     if (!decoded || !decoded.tenantId) {
+      console.log(`[DEBUG Auth] Token non valido per IP: ${req.ip}, Route: ${req.originalUrl} (Decoded: ${JSON.stringify(decoded)})`);
       return res.status(401).json({ error: 'Token non valido o scaduto' });
     }
 
     req.tenantId = decoded.tenantId;
     req.tenant = await db.getTenant(decoded.tenantId);
     req.user = await db.getUserById(decoded.userId);
+
+    console.log(`[DEBUG Auth] Tenant: ${req.tenant?.name} (${req.tenantId}), User: ${req.user?.email}, Route: ${req.originalUrl}`);
     next();
   } catch (error) {
     console.error('Auth error in legacyTenant:', error);
@@ -1386,14 +1410,15 @@ const legacyTenant = async (req, res, next) => {
 app.get('/api/stats', legacyTenant, async (req, res) => {
   try {
     const stats = await db.getStats(req.tenantId);
-    const totalMessages = parseInt(stats.messages_this_week) || 0;
-    const responseRate = totalMessages > 0 ? Math.min(94 + Math.floor(Math.random() * 5), 99) : 0;
-
+    const checkinStats = await db.getCheckinStatsGlobal(req.tenantId);
+    const referralStats = await db.getReferralStatsGlobal(req.tenantId);
     res.json({
       totalClients: parseInt(stats.total_clients) || 0,
       activeToday: parseInt(stats.active_today) || 0,
-      messagesThisWeek: totalMessages,
-      responseRate
+      messagesThisWeek: parseInt(stats.messages_this_week) || 0,
+      responseRate: 95,
+      checkins: checkinStats,
+      referrals: referralStats
     });
   } catch (error) {
     console.error('Errore stats:', error);
@@ -1407,8 +1432,8 @@ app.get('/api/clients', legacyTenant, async (req, res) => {
     const clients = await db.getAllClients(req.tenantId);
     res.json(clients.map(c => ({
       phone: c.phone,
-      name: c.name || 'Sconosciuto',
-      status: 'active',
+      name: c.name,
+      status: c.last_activity && new Date(c.last_activity) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) ? 'active' : 'inactive',
       objective: c.objective,
       experience: c.experience,
       daysPerWeek: c.days_per_week,
@@ -1815,6 +1840,57 @@ app.post('/api/rewards/:id/claim', legacyTenant, async (req, res) => {
   }
 });
 
+// Broadcast referral campaign to all active clients
+app.post('/api/referrals/broadcast', legacyTenant, async (req, res) => {
+  try {
+    const { messageTemplate } = req.body;
+    if (!messageTemplate) {
+      return res.status(400).json({ error: 'Messaggio template richiesto' });
+    }
+
+    if (!req.tenant.whatsapp_instance_name) {
+      return res.status(400).json({ error: 'WhatsApp non collegato' });
+    }
+
+    // Get all active clients (last 30 days)
+    const clients = await db.getActiveClients(req.tenantId, 30);
+    console.log(`[Broadcast] Starting referral campaign for ${clients.length} clients`);
+
+    // Run in background to avoid timeout
+    res.json({ success: true, message: `Campagna avviata per ${clients.length} clienti` });
+
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+    for (const client of clients) {
+      try {
+        const variables = await getDefaultVariables(client, req.tenant, db);
+        const personalizedMessage = renderTemplate(messageTemplate, variables);
+
+        await sendWhatsAppMessage(req.tenant.whatsapp_instance_name, client.phone, personalizedMessage);
+
+        // Save to message history
+        await db.addMessage(req.tenantId, client.phone, 'assistant', personalizedMessage, {
+          isBroadcast: true
+        });
+
+        // Small delay to avoid ban
+        await sleep(2000);
+      } catch (err) {
+        console.error(`[Broadcast] Error sending to ${client.phone}:`, err.message);
+      }
+    }
+
+    console.log(`[Broadcast] campaign completed for tenant ${req.tenantId}`);
+
+  } catch (error) {
+    console.error('Errore broadcast referral:', error);
+    // If headers not sent, we can send error
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
 // Config
 app.get('/api/reminders/config', legacyTenant, async (req, res) => {
   try {
@@ -1840,15 +1916,15 @@ app.get('/api/reminders/config', legacyTenant, async (req, res) => {
 app.get('/api/whatsapp/status', legacyTenant, async (req, res) => {
   try {
     const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
-    console.log(`Checking WhatsApp status for instance: ${instanceName}`);
-    console.log(`Evolution API URL: ${EVOLUTION_API_URL}`);
+    console.log(`[QR-DEBUG] Status check per: ${instanceName}`);
 
     const response = await axios.get(
       `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
       { headers: { 'apikey': EVOLUTION_API_KEY } }
-    );
-
-    console.log('Evolution API response:', response.data);
+    ).catch(err => {
+      console.log(`[QR-DEBUG] Istanza ${instanceName} non connessa o non esistente (Status: ${err.response?.status})`);
+      return { data: { instance: { state: 'disconnected' } } };
+    });
 
     res.json({
       connected: response?.data?.instance?.state === 'open',
@@ -1857,7 +1933,7 @@ app.get('/api/whatsapp/status', legacyTenant, async (req, res) => {
     });
   } catch (error) {
     console.error('Errore status WhatsApp:', error.message);
-    res.json({ connected: false, state: 'error', error: error.message });
+    res.json({ connected: false, state: 'error' });
   }
 });
 
@@ -1917,63 +1993,7 @@ app.get('/api/legacy/referrals', legacyTenant, async (req, res) => {
   }
 });
 
-// ========== ALIAS LEGACY PER DASHBOARD ESISTENTE ==========
-
-// Stats alias
-app.get('/api/stats', legacyTenant, async (req, res) => {
-  try {
-    const stats = await db.getStats(req.tenantId);
-    const checkinStats = await db.getCheckinStatsGlobal(req.tenantId);
-    const referralStats = await db.getReferralStatsGlobal(req.tenantId);
-    res.json({
-      totalClients: parseInt(stats.total_clients) || 0,
-      activeToday: parseInt(stats.active_today) || 0,
-      messagesThisWeek: parseInt(stats.messages_this_week) || 0,
-      responseRate: 95,
-      checkins: checkinStats,
-      referrals: referralStats
-    });
-  } catch (error) {
-    console.error('Errore stats:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Clients alias (senza auth per dashboard legacy)
-app.get('/api/clients', legacyTenant, async (req, res) => {
-  try {
-    const clients = await db.getAllClients(req.tenantId);
-    res.json(clients.map(c => ({
-      phone: c.phone,
-      name: c.name,
-      status: c.last_activity && new Date(c.last_activity) > new Date(Date.now() - 7*24*60*60*1000) ? 'active' : 'inactive',
-      objective: c.objective,
-      experience: c.experience,
-      daysPerWeek: c.days_per_week,
-      lastContact: c.last_activity,
-      createdAt: c.created_at
-    })));
-  } catch (error) {
-    console.error('Errore clients:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Conversations alias
-app.get('/api/conversations', legacyTenant, async (req, res) => {
-  try {
-    const clients = await db.getAllClients(req.tenantId);
-    res.json(clients.map(c => ({
-      phone: c.phone,
-      name: c.name,
-      lastMessage: '',
-      timestamp: c.last_activity
-    })));
-  } catch (error) {
-    console.error('Errore conversations:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+// ========== ALIAS LEGACY (RIMOSSI DUPLICATI) ==========
 
 app.get('/api/conversations/:phone', legacyTenant, async (req, res) => {
   try {
@@ -2328,6 +2348,28 @@ app.get('/api/brain/status', legacyTenant, async (req, res) => {
   }
 });
 
+// Brain: Get Settings per tenant
+app.get('/api/brain/settings', legacyTenant, async (req, res) => {
+  try {
+    const settings = await brain.getBrainSettings(req.tenant.id);
+    res.json(settings);
+  } catch (error) {
+    console.error('Errore brain settings GET:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Brain: Update Settings per tenant
+app.put('/api/brain/settings', legacyTenant, async (req, res) => {
+  try {
+    const updated = await brain.updateBrainSettings(req.tenant.id, req.body);
+    res.json(updated);
+  } catch (error) {
+    console.error('Errore brain settings PUT:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // AI config alias
 app.get('/api/ai/config', legacyTenant, async (req, res) => {
   try {
@@ -2384,7 +2426,6 @@ app.post('/api/ai/reset', legacyTenant, async (req, res) => {
 app.get('/api/whatsapp/info', legacyTenant, async (req, res) => {
   try {
     const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
-    console.log(`Getting WhatsApp info for instance: ${instanceName}`);
 
     const fetchResponse = await axios.get(
       `${EVOLUTION_API_URL}/instance/fetchInstances`,
@@ -2394,9 +2435,8 @@ app.get('/api/whatsapp/info', legacyTenant, async (req, res) => {
       return { data: [] };
     });
 
-    console.log('Instances found:', fetchResponse.data?.length || 0);
-    const instance = (fetchResponse.data || []).find(i => i.name === instanceName);
-    console.log('Found instance:', instance?.name, 'owner:', instance?.ownerJid);
+    const instances = Array.isArray(fetchResponse.data) ? fetchResponse.data : [];
+    const instance = instances.find(i => i.name === instanceName);
 
     res.json({
       instanceName,
@@ -2415,40 +2455,96 @@ app.get('/api/whatsapp/info', legacyTenant, async (req, res) => {
 app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
   try {
     const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
-    console.log(`Getting QR code for instance: ${instanceName}`);
+    console.log(`[QR Legacy] Richiesta QR per istanza: ${instanceName}`);
 
-    const statusResponse = await axios.get(
-      `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
-      { headers: { 'apikey': EVOLUTION_API_KEY } }
-    ).catch(err => {
-      console.error('Status check error:', err.message);
-      return null;
-    });
+    // Prima verifica se già connesso
+    try {
+      const statusResponse = await axios.get(
+        `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
+        { headers: { 'apikey': EVOLUTION_API_KEY } }
+      ).catch(() => null);
 
-    console.log('Status response:', statusResponse?.data);
-
-    if (statusResponse?.data?.instance?.state === 'open') {
-      return res.json({ connected: true });
+      const state = statusResponse?.data?.instance?.state || statusResponse?.data?.state;
+      if (state === 'open') {
+        return res.json({
+          connected: true,
+          message: 'WhatsApp già connesso'
+        });
+      }
+    } catch (e) {
+      console.log(`[QR Legacy] Istanza ${instanceName} non trovata o errore stato, provo a connettere/creare`);
     }
 
-    const qrResponse = await axios.get(
-      `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
-      { headers: { 'apikey': EVOLUTION_API_KEY } }
-    ).catch(err => {
-      console.error('QR fetch error:', err.message);
-      return null;
-    });
+    // Prova a ottenere QR esistente (richiama connect)
+    let qrcode = null;
+    let pairingCode = null;
 
-    console.log('QR response:', qrResponse?.data);
+    try {
+      const connectResponse = await axios.get(
+        `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
+        { headers: { 'apikey': EVOLUTION_API_KEY } }
+      );
+
+      qrcode = connectResponse.data?.qrcode?.base64 || connectResponse.data?.base64;
+      pairingCode = connectResponse.data?.pairingCode;
+
+      // Se Evolution API ha risposto con { count: 0 } e nessun QR o QR non pronto
+      if (!qrcode) {
+        console.log(`[QR Legacy] Istanza ${instanceName} non restituisce QR (forse count: 0), forzo eliminazione e ricreazione...`);
+        // Forziamo l'eliminazione per avere un QR pulito da instance/create
+        await axios.delete(
+          `${EVOLUTION_API_URL}/instance/delete/${instanceName}`,
+          { headers: { 'apikey': EVOLUTION_API_KEY } }
+        ).catch(() => null); // Ignoriamo se l'eliminazione fallisce
+        throw new Error("Forziamo la catch per ricreare");
+      }
+    } catch (e) {
+      console.log(`[QR Legacy] Impossibile ottenere QR da ${instanceName} o non esiste, procedo con creazione...`);
+
+      // Istanza non esiste o errore (o forzata l'eliminazione), creiamola
+      const createResponse = await axios.post(
+        `${EVOLUTION_API_URL}/instance/create`,
+        {
+          instanceName,
+          integration: 'WHATSAPP-BAILEYS',
+          qrcode: true
+        },
+        { headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY } }
+      ).catch(err => {
+        console.error(`[QR Legacy] Errore critico in creazione istanza: ${err.message}`);
+        return { data: {} };
+      });
+
+      // Aspetta brevemente che l'istanza sia pronta
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const qrResponse = await axios.get(
+        `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
+        { headers: { 'apikey': EVOLUTION_API_KEY } }
+      ).catch(() => ({ data: {} }));
+
+      qrcode = qrResponse.data?.qrcode?.base64 || qrResponse.data?.base64 || createResponse.data?.qrcode?.base64;
+      pairingCode = qrResponse.data?.pairingCode || createResponse.data?.pairingCode;
+    }
+
+    if (!qrcode) {
+      console.error(`[QR Legacy] Fallimento assoluto nella generazione QR code per ${instanceName}`);
+      return res.status(404).json({ error: 'Impossibile generare il QR code al momento' });
+    }
+
+    // Assicurati che il QR code abbia il prefisso data:image/png;base64 se non presente
+    if (qrcode && !qrcode.startsWith('data:')) {
+      qrcode = `data:image/png;base64,${qrcode}`;
+    }
 
     res.json({
       connected: false,
-      qrcode: qrResponse?.data?.base64 || qrResponse?.data?.qrcode?.base64,
-      pairingCode: qrResponse?.data?.pairingCode
+      qrcode,
+      pairingCode
     });
   } catch (error) {
-    console.error('Errore WhatsApp QR:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('WhatsApp QR error:', error.response?.data || error.message);
+    res.status(500).json({ error: error.response?.data?.message || error.message });
   }
 });
 
@@ -2473,10 +2569,11 @@ app.post('/api/whatsapp/disconnect', legacyTenant, async (req, res) => {
 app.post('/api/whatsapp/restart', legacyTenant, async (req, res) => {
   try {
     const instanceName = req.tenant?.whatsapp_instance_name || 'palestra';
+    console.log(`[WhatsApp Legacy] Restart istanza: ${instanceName}`);
 
-    await axios.put(
-      `${EVOLUTION_API_URL}/instance/restart/${instanceName}`,
-      {},
+    // Forza logout se esiste
+    await axios.delete(
+      `${EVOLUTION_API_URL}/instance/logout/${instanceName}`,
       { headers: { 'apikey': EVOLUTION_API_KEY } }
     ).catch(() => null);
 
@@ -3408,7 +3505,8 @@ async function startServer() {
       { name: 'monitoring', file: '005-monitoring.sql' },
       { name: 'onboarding', file: '006-onboarding.sql' },
       { name: 'analytics', file: '007-analytics.sql' },
-      { name: 'brain', file: '009-brain.sql' }
+      { name: 'brain', file: '009-brain.sql' },
+      { name: 'brain-settings', file: '010-brain-settings.sql' }
     ];
 
     for (const migration of migrations) {
