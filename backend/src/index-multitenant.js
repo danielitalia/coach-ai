@@ -6,6 +6,7 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
+const { enqueueWhatsAppMessage } = require('./services/whatsapp-queue');
 require('dotenv').config();
 
 // Database Multi-tenant
@@ -1859,24 +1860,27 @@ app.post('/api/referrals/broadcast', legacyTenant, async (req, res) => {
     // Run in background to avoid timeout
     res.json({ success: true, message: `Campagna avviata per ${clients.length} clienti` });
 
-    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
+    // Togliamo il manual sleep e usiamo la coda:
     for (const client of clients) {
       try {
         const variables = await getDefaultVariables(client, req.tenant, db);
         const personalizedMessage = renderTemplate(messageTemplate, variables);
 
-        await sendWhatsAppMessage(req.tenant.whatsapp_instance_name, client.phone, personalizedMessage);
+        // Aggiunge asincronamente alla coda senza bloccare Node.js
+        await enqueueWhatsAppMessage(
+          req.tenantId,
+          req.tenant.whatsapp_instance_name,
+          client.phone,
+          personalizedMessage
+        );
 
         // Save to message history
         await db.addMessage(req.tenantId, client.phone, 'assistant', personalizedMessage, {
           isBroadcast: true
         });
 
-        // Small delay to avoid ban
-        await sleep(2000);
       } catch (err) {
-        console.error(`[Broadcast] Error sending to ${client.phone}:`, err.message);
+        console.error(`[Broadcast] Errore inserimento in coda per ${client.phone}:`, err.message);
       }
     }
 
@@ -3549,8 +3553,8 @@ async function startServer() {
       }
     }
 
-    // Initialize and start marketing automation
-    automation.init(db, sendWhatsAppMessage);
+    // Initialize and start marketing automation with BullMQ queue
+    automation.init(db, enqueueWhatsAppMessage);
     automation.start();
 
     // Initialize and start Brain AI

@@ -45,14 +45,14 @@ async function process(tenant, db, sendMessage) {
 
       // Render message
       const variables = {
-        ...getDefaultVariables(client, tenant),
+        ...(await getDefaultVariables(client, tenant, db)),
         days_inactive: days,
       };
       const message = renderTemplate(sequence.message_template, variables);
 
       // Send message
       try {
-        await sendMessage(tenant.whatsapp_instance_name, client.phone, message);
+        await sendMessage(tenant.id, tenant.whatsapp_instance_name, client.phone, message);
 
         // Log successful job
         await db.createAutomationJob({
