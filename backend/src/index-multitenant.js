@@ -2543,6 +2543,9 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
         { headers: { 'apikey': EVOLUTION_API_KEY } }
       ).catch(() => ({ data: {} }));
 
+      console.log(`[QR Legacy] createResponse data:`, JSON.stringify(createResponse?.data));
+      console.log(`[QR Legacy] qrResponse data:`, JSON.stringify(qrResponse?.data));
+
       qrcode = qrResponse.data?.qrcode?.base64 || qrResponse.data?.base64 || createResponse.data?.qrcode?.base64;
       pairingCode = qrResponse.data?.pairingCode || createResponse.data?.pairingCode;
     }
