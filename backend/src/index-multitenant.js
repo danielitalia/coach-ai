@@ -2471,7 +2471,7 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
     try {
       const statusResponse = await axios.get(
         `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
-        { headers: { 'apikey': EVOLUTION_API_KEY } }
+        { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 15000 }
       ).catch(() => null);
 
       const state = statusResponse?.data?.instance?.state || statusResponse?.data?.state;
@@ -2492,7 +2492,7 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
     try {
       const connectResponse = await axios.get(
         `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
-        { headers: { 'apikey': EVOLUTION_API_KEY } }
+        { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 15000 }
       );
 
       qrcode = connectResponse.data?.qrcode?.base64 || connectResponse.data?.base64;
@@ -2504,7 +2504,7 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
         // Disconnetti prima
         await axios.delete(
           `${EVOLUTION_API_URL}/instance/logout/${instanceName}`,
-          { headers: { 'apikey': EVOLUTION_API_KEY } }
+          { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 10000 }
         ).catch(() => null);
 
         await new Promise(r => setTimeout(r, 1000));
@@ -2512,7 +2512,7 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
         // Forziamo l'eliminazione per avere un QR pulito da instance/create
         await axios.delete(
           `${EVOLUTION_API_URL}/instance/delete/${instanceName}`,
-          { headers: { 'apikey': EVOLUTION_API_KEY } }
+          { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 15000 }
         ).catch(() => null); // Ignoriamo se l'eliminazione fallisce
 
         await new Promise(r => setTimeout(r, 2000));
@@ -2529,7 +2529,7 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
           integration: 'WHATSAPP-BAILEYS',
           qrcode: true
         },
-        { headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY } }
+        { headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY }, timeout: 25000 }
       ).catch(err => {
         console.error(`[QR Legacy] Errore critico in creazione istanza: ${err.message}`);
         return { data: {} };
@@ -2540,7 +2540,7 @@ app.get('/api/whatsapp/qrcode', legacyTenant, async (req, res) => {
 
       const qrResponse = await axios.get(
         `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
-        { headers: { 'apikey': EVOLUTION_API_KEY } }
+        { headers: { 'apikey': EVOLUTION_API_KEY }, timeout: 15000 }
       ).catch(() => ({ data: {} }));
 
       console.log(`[QR Legacy] createResponse data:`, JSON.stringify(createResponse?.data));
