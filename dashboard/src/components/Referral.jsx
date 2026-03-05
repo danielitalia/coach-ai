@@ -1,18 +1,25 @@
 import { useState, useEffect } from 'react'
 import {
   Gift, Users, Trophy, TrendingUp, Clock,
-  CheckCircle, XCircle, UserPlus, Award, Share2
+  CheckCircle, XCircle, UserPlus, Award, Share2, Send
 } from 'lucide-react'
 
-const API_URL = import.meta.env.VITE_API_URL || '/api'
+import { useAuth } from '../context/AuthContext'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 export default function Referral() {
+  const { authFetch } = useAuth()
   const [stats, setStats] = useState(null)
   const [referrals, setReferrals] = useState([])
   const [leaderboard, setLeaderboard] = useState([])
   const [rewards, setRewards] = useState([])
   const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(true)
+  const [broadcasting, setBroadcasting] = useState(false)
+  const [messageTemplate, setMessageTemplate] = useState('Ciao {{client_name}}! Sapevi che portando un amico in {{gym_name}} entrambi ricevete una settimana gratis? 🎁\n\nEcco il tuo codice da condividere: {{referral_code}}\n\nBasta che il tuo amico scriva questo codice qui in chat! 🚀')
+  const [broadcastStatus, setBroadcastStatus] = useState(null)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     loadData()
@@ -20,19 +27,30 @@ export default function Referral() {
 
   const loadData = async () => {
     try {
+      setError(null)
       const [statsRes, referralsRes, leaderboardRes, rewardsRes] = await Promise.all([
-        fetch(`${API_URL}/referrals/stats`),
-        fetch(`${API_URL}/referrals`),
-        fetch(`${API_URL}/referrals/leaderboard`),
-        fetch(`${API_URL}/rewards`)
+        authFetch(`${API_URL}/api/referrals/stats`),
+        authFetch(`${API_URL}/api/referrals`),
+        authFetch(`${API_URL}/api/referrals/leaderboard`),
+        authFetch(`${API_URL}/api/rewards`)
       ])
 
-      setStats(await statsRes.json())
-      setReferrals(await referralsRes.json())
-      setLeaderboard(await leaderboardRes.json())
-      setRewards(await rewardsRes.json())
+      if (statsRes.ok) setStats(await statsRes.json())
+      if (referralsRes.ok) {
+        const data = await referralsRes.json()
+        setReferrals(Array.isArray(data) ? data : [])
+      }
+      if (leaderboardRes.ok) {
+        const data = await leaderboardRes.json()
+        setLeaderboard(Array.isArray(data) ? data : [])
+      }
+      if (rewardsRes.ok) {
+        const data = await rewardsRes.json()
+        setRewards(Array.isArray(data) ? data : [])
+      }
     } catch (error) {
       console.error('Errore caricamento dati:', error)
+      setError('Errore di connessione al server')
     } finally {
       setLoading(false)
     }
@@ -40,7 +58,7 @@ export default function Referral() {
 
   const claimReward = async (rewardId, phone) => {
     try {
-      const res = await fetch(`${API_URL}/rewards/${rewardId}/claim`, {
+      const res = await authFetch(`${API_URL}/api/rewards/${rewardId}/claim`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone })
@@ -50,6 +68,31 @@ export default function Referral() {
       }
     } catch (error) {
       console.error('Errore riscatto premio:', error)
+    }
+  }
+
+  const launchBroadcast = async () => {
+    if (!window.confirm('Sei sicuro di voler inviare questo messaggio a tutti i tuoi clienti attivi?')) return
+
+    setBroadcasting(true)
+    setBroadcastStatus(null)
+    try {
+      const res = await authFetch(`${API_URL}/api/referrals/broadcast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageTemplate })
+      })
+
+      if (res.ok) {
+        setBroadcastStatus({ type: 'success', text: 'Campagna avviata con successo!' })
+      } else {
+        const err = await res.json()
+        setBroadcastStatus({ type: 'error', text: err.error || 'Errore durante l\'invio' })
+      }
+    } catch (error) {
+      setBroadcastStatus({ type: 'error', text: 'Errore di connessione' })
+    } finally {
+      setBroadcasting(false)
     }
   }
 
@@ -84,6 +127,14 @@ export default function Referral() {
         <h1 className="text-2xl font-bold text-gray-900">Programma Referral</h1>
         <p className="text-gray-500">Gestisci il programma "Porta un Amico"</p>
       </div>
+
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-sm text-red-700">
+          <XCircle className="w-4 h-4 shrink-0" />
+          {error}
+          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">&times;</button>
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -144,16 +195,16 @@ export default function Referral() {
               { id: 'overview', label: 'Panoramica', icon: TrendingUp },
               { id: 'referrals', label: 'Tutti gli Inviti', icon: Users },
               { id: 'rewards', label: 'Premi', icon: Gift },
-              { id: 'leaderboard', label: 'Classifica', icon: Trophy }
+              { id: 'leaderboard', label: 'Classifica', icon: Trophy },
+              { id: 'campaign', label: 'Campagna Invito', icon: Send }
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 py-4 border-b-2 transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-green-500 text-green-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
+                className={`flex items-center gap-2 py-4 border-b-2 transition-colors ${activeTab === tab.id
+                  ? 'border-green-500 text-green-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
               >
                 <tab.icon className="w-4 h-4" />
                 {tab.label}
@@ -215,19 +266,18 @@ export default function Referral() {
               {/* Top Referrers Mini */}
               <div className="bg-gray-50 rounded-xl p-6">
                 <h3 className="font-semibold mb-4">Top Referrer</h3>
-                {leaderboard.length === 0 ? (
+                {Array.isArray(leaderboard) && leaderboard.length === 0 ? (
                   <p className="text-gray-500 text-center py-8">
                     Nessun referral completato ancora
                   </p>
                 ) : (
                   <div className="space-y-3">
-                    {leaderboard.slice(0, 5).map((user, index) => (
+                    {Array.isArray(leaderboard) && leaderboard.slice(0, 5).map((user, index) => (
                       <div key={user.phone} className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold ${
-                          index === 0 ? 'bg-yellow-500' :
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold ${index === 0 ? 'bg-yellow-500' :
                           index === 1 ? 'bg-gray-400' :
-                          index === 2 ? 'bg-amber-600' : 'bg-gray-300'
-                        }`}>
+                            index === 2 ? 'bg-amber-600' : 'bg-gray-300'
+                          }`}>
                           {index + 1}
                         </div>
                         <div className="flex-1">
@@ -269,7 +319,78 @@ export default function Referral() {
                     </div>
                   </div>
                 </div>
+
+                <div className="mt-8 flex justify-center">
+                  <button
+                    onClick={() => setActiveTab('campaign')}
+                    className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition-all shadow-lg hover:shadow-green-200"
+                  >
+                    <Send className="w-5 h-5" />
+                    Lancia Campagna Ora
+                  </button>
+                </div>
               </div>
+            </div>
+          )}
+
+          {/* Campaign Tab */}
+          {activeTab === 'campaign' && (
+            <div className="max-w-3xl mx-auto space-y-6">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+                <h3 className="text-blue-900 font-bold flex items-center gap-2 mb-2">
+                  <Send className="w-5 h-5" />
+                  Broadcast Proattivo
+                </h3>
+                <p className="text-blue-800 text-sm">
+                  Invia il codice personale a tutti i tuoi clienti attivi (quelli che hanno fatto check-in negli ultimi 30 giorni).
+                  È il modo migliore per dare una spinta veloce alle iscrizioni!
+                </p>
+              </div>
+
+              {broadcastStatus && (
+                <div className={`p-4 rounded-xl flex items-center gap-3 ${broadcastStatus.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                  }`}>
+                  {broadcastStatus.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
+                  {broadcastStatus.text}
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <label className="block font-semibold text-gray-900">Modello Messaggio</label>
+                <textarea
+                  value={messageTemplate}
+                  onChange={(e) => setMessageTemplate(e.target.value)}
+                  rows={6}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 outline-none text-gray-700"
+                  placeholder="Scrivi qui il messaggio per i tuoi clienti..."
+                />
+                <div className="flex flex-wrap gap-2">
+                  <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-600">{'{{client_name}}'}</span>
+                  <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-600">{'{{gym_name}}'}</span>
+                  <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-600">{'{{referral_code}}'}</span>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-6 border border-gray-100">
+                <h4 className="font-semibold mb-3">Anteprima Messaggio</h4>
+                <div className="bg-white border rounded-lg p-4 text-sm text-gray-600 shadow-sm relative">
+                  <div className="absolute top-2 left-[-8px] border-[8px] border-transparent border-r-white"></div>
+                  {messageTemplate
+                    .replace('{{client_name}}', 'Mario')
+                    .replace('{{gym_name}}', 'Palestra Top')
+                    .replace('{{referral_code}}', 'ABC123XYZ')
+                    .split('\n').map((line, i) => <p key={i}>{line || <br />}</p>)}
+                </div>
+              </div>
+
+              <button
+                onClick={launchBroadcast}
+                disabled={broadcasting}
+                className={`w-full py-4 rounded-xl font-bold text-white shadow-xl transition-all ${broadcasting ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 active:scale-95'
+                  }`}
+              >
+                {broadcasting ? 'Inviando messaggi...' : 'Invia a tutti i clienti'}
+              </button>
             </div>
           )}
 
@@ -416,19 +537,17 @@ export default function Referral() {
                   {leaderboard.map((user, index) => (
                     <div
                       key={user.phone}
-                      className={`flex items-center gap-4 p-4 rounded-xl ${
-                        index === 0 ? 'bg-gradient-to-r from-yellow-50 to-amber-50 border-2 border-yellow-200' :
+                      className={`flex items-center gap-4 p-4 rounded-xl ${index === 0 ? 'bg-gradient-to-r from-yellow-50 to-amber-50 border-2 border-yellow-200' :
                         index === 1 ? 'bg-gray-50 border border-gray-200' :
-                        index === 2 ? 'bg-orange-50 border border-orange-200' :
-                        'bg-white border border-gray-100'
-                      }`}
+                          index === 2 ? 'bg-orange-50 border border-orange-200' :
+                            'bg-white border border-gray-100'
+                        }`}
                     >
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xl ${
-                        index === 0 ? 'bg-gradient-to-br from-yellow-400 to-amber-500' :
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xl ${index === 0 ? 'bg-gradient-to-br from-yellow-400 to-amber-500' :
                         index === 1 ? 'bg-gradient-to-br from-gray-300 to-gray-400' :
-                        index === 2 ? 'bg-gradient-to-br from-orange-400 to-amber-600' :
-                        'bg-gray-300'
-                      }`}>
+                          index === 2 ? 'bg-gradient-to-br from-orange-400 to-amber-600' :
+                            'bg-gray-300'
+                        }`}>
                         {index === 0 ? <Trophy className="w-6 h-6" /> : index + 1}
                       </div>
                       <div className="flex-1">

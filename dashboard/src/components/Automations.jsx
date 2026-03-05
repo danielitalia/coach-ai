@@ -5,9 +5,12 @@ import {
   TrendingUp, Send, Calendar, Award, UserMinus
 } from 'lucide-react'
 
-const API_URL = ''
+import { useAuth } from '../context/AuthContext'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function Automations() {
+  const { authFetch } = useAuth()
   const [sequences, setSequences] = useState([])
   const [stats, setStats] = useState(null)
   const [jobs, setJobs] = useState([])
@@ -26,17 +29,25 @@ function Automations() {
     setLoading(true)
     try {
       const [seqRes, statsRes, jobsRes] = await Promise.all([
-        fetch(`${API_URL}/api/automations`),
-        fetch(`${API_URL}/api/automations/stats`),
-        fetch(`${API_URL}/api/automations/jobs?limit=50`)
+        authFetch(`${API_URL}/api/automations`),
+        authFetch(`${API_URL}/api/automations/stats`),
+        authFetch(`${API_URL}/api/automations/jobs?limit=50`)
       ])
 
-      if (seqRes.ok) setSequences(await seqRes.json())
+      console.log('[Automations] API responses:', seqRes.status, statsRes.status, jobsRes.status)
+
+      if (seqRes.ok) {
+        const data = await seqRes.json()
+        console.log('[Automations] Sequences loaded:', data.length)
+        setSequences(data)
+      } else {
+        console.error('[Automations] Sequences error:', seqRes.status)
+      }
       if (statsRes.ok) setStats(await statsRes.json())
       if (jobsRes.ok) setJobs(await jobsRes.json())
     } catch (err) {
-      console.log('Errore fetch:', err)
-      setMessage({ type: 'error', text: 'Errore nel caricamento dati' })
+      console.error('[Automations] Fetch error:', err)
+      setMessage({ type: 'error', text: 'Errore nel caricamento dati. Ricarica la pagina.' })
     } finally {
       setLoading(false)
     }
@@ -45,7 +56,7 @@ function Automations() {
   const triggerRun = async () => {
     setRunning(true)
     try {
-      const res = await fetch(`${API_URL}/api/automations/run`, { method: 'POST' })
+      const res = await authFetch(`${API_URL}/api/automations/run`, { method: 'POST' })
       if (res.ok) {
         setMessage({ type: 'success', text: 'Automazioni eseguite!' })
         setTimeout(() => {
@@ -62,7 +73,7 @@ function Automations() {
 
   const toggleSequence = async (id) => {
     try {
-      const res = await fetch(`${API_URL}/api/automations/${id}/toggle`, { method: 'POST' })
+      const res = await authFetch(`${API_URL}/api/automations/${id}/toggle`, { method: 'POST' })
       if (res.ok) {
         const updated = await res.json()
         setSequences(sequences.map(s => s.id === id ? updated : s))
@@ -92,7 +103,7 @@ function Automations() {
 
   const saveEdit = async (id) => {
     try {
-      const res = await fetch(`${API_URL}/api/automations/${id}`, {
+      const res = await authFetch(`${API_URL}/api/automations/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm)

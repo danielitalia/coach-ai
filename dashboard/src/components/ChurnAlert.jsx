@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Send, CheckCircle2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Send, CheckCircle2, RefreshCw, XCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -10,6 +10,7 @@ export default function ChurnAlert() {
     const [loading, setLoading] = useState(true);
     const [actioningPhone, setActioningPhone] = useState(null);
     const [successPhones, setSuccessPhones] = useState([]);
+    const [errorMsg, setErrorMsg] = useState(null);
 
     useEffect(() => {
         fetchClients();
@@ -56,13 +57,14 @@ export default function ChurnAlert() {
 
             if (res.ok) {
                 setSuccessPhones(prev => [...prev, phone]);
+                setErrorMsg(null);
             } else {
                 const data = await res.json();
-                alert(`Errore: ${data.error || 'Impossibile inviare il messaggio'}`);
+                setErrorMsg(data.error || 'Impossibile inviare il messaggio');
             }
         } catch (err) {
             console.error('Error triggering reengage API', err);
-            alert('Errore di rete durante la richiesta.');
+            setErrorMsg('Errore di rete durante la richiesta.');
         } finally {
             setActioningPhone(null);
         }
@@ -95,68 +97,108 @@ export default function ChurnAlert() {
     }
 
     return (
-        <div className="bg-gradient-to-br from-red-50 to-orange-50 border border-red-200 rounded-xl p-6 mb-6 shadow-sm">
-            <div className="flex items-start gap-4 mb-4">
-                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-                    <AlertTriangle className="w-6 h-6 text-red-600" />
-                </div>
+        <div className="bg-[#fdf2f0] -mx-4 lg:-mx-8 px-4 lg:px-8 py-6 mb-8 mt-2 lg:mt-0 lg:border-t-0 shadow-sm border-b border-[#fcecec]">
+            <div className="flex items-start gap-3 mb-6">
+                <AlertTriangle className="w-6 h-6 text-[#d32f2f] flex-shrink-0 mt-0.5" />
                 <div>
-                    <h3 className="text-xl font-bold text-red-900">
+                    <h3 className="text-lg font-bold text-[#8c1d18] tracking-tight">
                         Attenzione: {atRiskClients.length} {atRiskClients.length === 1 ? 'cliente a rischio' : 'clienti a rischio'} di abbandono
                     </h3>
-                    <p className="text-red-700 text-sm mt-1">
+                    <p className="text-[#d32f2f] text-sm mt-1">
                         Reagisci subito. I seguenti clienti non si allenano da oltre due settimane o mostrano pattern di abbandono. Il Brain AI è pronto a recuperarli.
                     </p>
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-6">
+            {errorMsg && (
+                <div className="mb-4 p-3 bg-white border border-red-200 rounded-lg flex items-center gap-2 text-sm text-red-700">
+                    <XCircle className="w-4 h-4 shrink-0" />
+                    {errorMsg}
+                    <button onClick={() => setErrorMsg(null)} className="ml-auto text-red-400 hover:text-red-600">&times;</button>
+                </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {atRiskClients.map((client) => {
                     const isSuccess = successPhones.includes(client.phone);
                     const isActioning = actioningPhone === client.phone;
 
                     return (
-                        <div key={client.phone} className="bg-white rounded-lg p-4 border border-red-100 shadow-sm flex flex-col justify-between">
-                            <div>
-                                <div className="flex justify-between items-start">
-                                    <h4 className="font-bold text-gray-900">{client.name}</h4>
-                                    {client.churnRisk >= 0.8 && (
-                                        <span className="px-2 py-1 bg-red-100 text-red-800 text-xs font-bold rounded-full">
-                                            Critico
-                                        </span>
-                                    )}
-                                </div>
-
-                                <div className="mt-2 text-sm text-gray-600 space-y-1">
-                                    {client.daysSinceLastCheckin ? (
-                                        <p>Inattivo da: <span className="font-semibold text-red-600">{client.daysSinceLastCheckin} giorni</span></p>
-                                    ) : (
-                                        <p>Rischio AI: <span className="font-semibold text-orange-500">{Math.round((client.churnRisk || 0) * 100)}%</span></p>
-                                    )}
-                                    {client.objective && <p className="truncate">Obiettivo: {client.objective}</p>}
-                                </div>
+                        <div key={client.phone} className="bg-white rounded-xl p-5 shadow-sm flex flex-col justify-between h-full border-0">
+                            <div className="mb-4">
+                                {client.name ? (
+                                    <>
+                                        <div className="flex justify-between items-start w-full mb-2 min-h-[24px]">
+                                            <h4 className="font-bold text-gray-900 text-[15px] leading-tight break-words pr-2">
+                                                {client.name}
+                                            </h4>
+                                            {client.churnRisk >= 0.8 && (
+                                                <span className="px-2 py-0.5 bg-[#fdf2f0] text-[#d32f2f] text-[11px] font-bold rounded-md shrink-0 uppercase tracking-wide">
+                                                    Critico
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-[13px] text-gray-700 flex-1 flex flex-col">
+                                            {client.daysSinceLastCheckin === 999 ? (
+                                                <p>Stato: <span className="font-bold text-[#d32f2f]">Mai allenato</span></p>
+                                            ) : client.daysSinceLastCheckin ? (
+                                                <p>Inattivo da: <span className="font-bold text-[#d32f2f]">{client.daysSinceLastCheckin} giorni</span></p>
+                                            ) : (
+                                                <p>Rischio AI: <span className="font-bold text-[#d32f2f]">{Math.round((client.churnRisk || 0) * 100)}%</span></p>
+                                            )}
+                                            <p className="text-gray-500 pt-1 min-h-[20px]">
+                                                {client.objective ? `Obiettivo: ${client.objective}` : '\u00A0'}
+                                            </p>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="flex justify-between items-start w-full mb-2 min-h-[24px]">
+                                            <h4 className="font-bold text-transparent text-[15px] leading-tight select-none">
+                                                NessunNome
+                                            </h4>
+                                            {client.churnRisk >= 0.8 && (
+                                                <span className="px-2 py-0.5 bg-[#fdf2f0] text-[#d32f2f] text-[11px] font-bold rounded-md shrink-0 uppercase tracking-wide">
+                                                    Critico
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-[13px] text-gray-700 flex-1 flex flex-col">
+                                            {client.daysSinceLastCheckin === 999 ? (
+                                                <p>Stato: <span className="font-bold text-[#d32f2f]">Mai allenato</span></p>
+                                            ) : client.daysSinceLastCheckin ? (
+                                                <p>Inattivo da: <span className="font-bold text-[#d32f2f]">{client.daysSinceLastCheckin} giorni</span></p>
+                                            ) : (
+                                                <p>Rischio AI: <span className="font-bold text-[#d32f2f]">{Math.round((client.churnRisk || 0) * 100)}%</span></p>
+                                            )}
+                                            <p className="text-gray-500 pt-1 min-h-[20px]">
+                                                {'\u00A0'}
+                                            </p>
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
-                            <div className="mt-4 pt-4 border-t border-gray-100">
+                            <div className="mt-auto">
                                 {isSuccess ? (
-                                    <div className="flex items-center justify-center gap-2 text-green-600 bg-green-50 py-2 rounded-lg font-medium text-sm">
-                                        <CheckCircle2 className="w-4 h-4" />
+                                    <div className="flex items-center justify-center gap-2 text-white bg-green-500 py-2.5 px-4 rounded-lg font-semibold text-sm shadow-sm transition-all focus:outline-none">
+                                        <CheckCircle2 className="w-5 h-5" />
                                         <span>Messaggio inviato</span>
                                     </div>
                                 ) : (
                                     <button
                                         onClick={() => handleReengage(client.phone)}
                                         disabled={isActioning}
-                                        className={`w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg font-medium text-sm transition-all ${isActioning
-                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                            : 'bg-red-600 hover:bg-red-700 text-white shadow-sm hover:shadow-md'
+                                        className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-semibold text-sm transition-all focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ${isActioning
+                                            ? 'bg-red-300 text-white cursor-not-allowed'
+                                            : 'bg-[#d32f2f] hover:bg-[#b71c1c] text-white shadow-sm'
                                             }`}
                                     >
                                         {isActioning ? (
-                                            <RefreshCw className="w-4 h-4 animate-spin" />
+                                            <RefreshCw className="w-5 h-5 animate-spin" />
                                         ) : (
                                             <>
-                                                <Send className="w-4 h-4" />
+                                                <Send className="w-4 h-4 ml-[-4px]" />
                                                 <span>Richiama tramite AI</span>
                                             </>
                                         )}

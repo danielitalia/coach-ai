@@ -225,7 +225,8 @@ router.get('/whatsapp/status', requireTenant, async (req, res) => {
       { headers: { 'apikey': EVOLUTION_API_KEY } }
     ).catch(() => null);
 
-    const connected = response?.data?.state === 'open';
+    const state = response?.data?.instance?.state || response?.data?.state;
+    const connected = state === 'open';
 
     // Aggiorna stato nel DB se diverso
     if (connected !== req.tenant.whatsapp_connected) {
@@ -234,7 +235,7 @@ router.get('/whatsapp/status', requireTenant, async (req, res) => {
 
     res.json({
       connected,
-      state: response?.data?.state || 'unknown',
+      state: state || 'unknown',
       instanceName
     });
   } catch (error) {
@@ -244,67 +245,85 @@ router.get('/whatsapp/status', requireTenant, async (req, res) => {
 });
 
 // Get WhatsApp QR code
-router.get('/whatsapp/qr', requireTenant, requireRole('owner', 'admin'), async (req, res) => {
+router.get(['/whatsapp/qr', '/whatsapp/qrcode'], requireTenant, requireRole('owner', 'admin'), async (req, res) => {
   try {
     const instanceName = req.tenant.whatsapp_instance_name || `coach-ai-${req.tenant.slug}`;
+    console.log(`[QR] Richiesta QR per istanza: ${instanceName}`);
 
     // Prima verifica se già connesso
-    const statusResponse = await axios.get(
-      `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
-      { headers: { 'apikey': EVOLUTION_API_KEY } }
-    ).catch(() => null);
+    try {
+      const statusResponse = await axios.get(
+        `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`,
+        { headers: { 'apikey': EVOLUTION_API_KEY } }
+      );
 
-    if (statusResponse?.data?.state === 'open') {
-      return res.json({
-        connected: true,
-        message: 'WhatsApp già connesso'
-      });
+      const state = statusResponse?.data?.instance?.state || statusResponse?.data?.state;
+      if (state === 'open') {
+        return res.json({
+          connected: true,
+          message: 'WhatsApp già connesso'
+        });
+      }
+    } catch (e) {
+      console.log(`[QR] Istanza ${instanceName} non trovata o errore stato, provo a connettere/creare`);
     }
 
-    // Prova a ottenere QR esistente
+    // Prova a ottenere QR esistente (richiama connect)
+    let qrcode = null;
+    let pairingCode = null;
+
     try {
       const connectResponse = await axios.get(
         `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
         { headers: { 'apikey': EVOLUTION_API_KEY } }
       );
 
-      if (connectResponse.data?.qrcode?.base64 || connectResponse.data?.base64) {
-        return res.json({
-          connected: false,
-          qrcode: connectResponse.data.qrcode?.base64 || connectResponse.data.base64,
-          pairingCode: connectResponse.data.pairingCode
-        });
-      }
+      qrcode = connectResponse.data?.qrcode?.base64 || connectResponse.data?.base64;
+      pairingCode = connectResponse.data?.pairingCode;
     } catch (e) {
-      // Istanza non esiste, creiamola
+      console.log(`[QR] Impossibile connettere a ${instanceName}, provo a creare l'istanza`);
+
+      // Istanza non esiste o errore, creiamola
+      const createResponse = await axios.post(
+        `${EVOLUTION_API_URL}/instance/create`,
+        {
+          instanceName,
+          integration: 'WHATSAPP-BAILEYS',
+          qrcode: true
+        },
+        { headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY } }
+      );
+
+      // Salva nome istanza nel tenant se non presente
+      if (!req.tenant.whatsapp_instance_name) {
+        await db.updateTenant(req.tenantId, { whatsappInstanceName: instanceName });
+      }
+
+      // Aspetta brevemente che l'istanza sia pronta
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const qrResponse = await axios.get(
+        `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
+        { headers: { 'apikey': EVOLUTION_API_KEY } }
+      );
+
+      qrcode = qrResponse.data?.qrcode?.base64 || qrResponse.data?.base64 || createResponse.data?.qrcode?.base64;
+      pairingCode = qrResponse.data?.pairingCode || createResponse.data?.pairingCode;
     }
 
-    // Crea nuova istanza
-    const createResponse = await axios.post(
-      `${EVOLUTION_API_URL}/instance/create`,
-      {
-        instanceName,
-        integration: 'WHATSAPP-BAILEYS',
-        qrcode: true
-      },
-      { headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY } }
-    );
+    if (!qrcode) {
+      return res.status(404).json({ error: 'Impossibile generare il QR code al momento' });
+    }
 
-    // Salva nome istanza nel tenant
-    await db.updateTenant(req.tenantId, { whatsappInstanceName: instanceName });
-
-    // Aspetta e ottieni QR
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const qrResponse = await axios.get(
-      `${EVOLUTION_API_URL}/instance/connect/${instanceName}`,
-      { headers: { 'apikey': EVOLUTION_API_KEY } }
-    );
+    // Assicurati che il QR code abbia il prefisso data:image/png;base64 se non presente
+    if (qrcode && !qrcode.startsWith('data:')) {
+      qrcode = `data:image/png;base64,${qrcode}`;
+    }
 
     res.json({
       connected: false,
-      qrcode: qrResponse.data?.qrcode?.base64 || qrResponse.data?.base64 || createResponse.data?.qrcode?.base64,
-      pairingCode: qrResponse.data?.pairingCode || createResponse.data?.pairingCode
+      qrcode,
+      pairingCode
     });
   } catch (error) {
     console.error('WhatsApp QR error:', error.response?.data || error.message);
@@ -321,7 +340,7 @@ router.post('/whatsapp/disconnect', requireTenant, requireRole('owner', 'admin')
       await axios.delete(
         `${EVOLUTION_API_URL}/instance/logout/${instanceName}`,
         { headers: { 'apikey': EVOLUTION_API_KEY } }
-      );
+      ).catch(err => console.log(`[WhatsApp] Errore logout: ${err.message}`));
     }
 
     await db.updateTenant(req.tenantId, { whatsappConnected: false });
@@ -331,6 +350,29 @@ router.post('/whatsapp/disconnect', requireTenant, requireRole('owner', 'admin')
     res.json({ success: true, message: 'WhatsApp disconnesso' });
   } catch (error) {
     console.error('WhatsApp disconnect error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Restart WhatsApp instance (force new QR)
+router.post('/whatsapp/restart', requireTenant, requireRole('owner', 'admin'), async (req, res) => {
+  try {
+    const instanceName = req.tenant.whatsapp_instance_name || `coach-ai-${req.tenant.slug}`;
+    console.log(`[WhatsApp] Restart istanza: ${instanceName}`);
+
+    // Forza logout se esiste
+    await axios.delete(
+      `${EVOLUTION_API_URL}/instance/logout/${instanceName}`,
+      { headers: { 'apikey': EVOLUTION_API_KEY } }
+    ).catch(() => null);
+
+    // Salva stato disconnesso
+    await db.updateTenant(req.tenantId, { whatsappConnected: false });
+
+    // Restituisce successo, il frontend poi chiamerà /qrcode
+    res.json({ success: true, message: 'Istanza riavviata' });
+  } catch (error) {
+    console.error('WhatsApp restart error:', error);
     res.status(500).json({ error: error.message });
   }
 });

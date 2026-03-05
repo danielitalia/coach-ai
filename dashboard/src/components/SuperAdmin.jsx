@@ -5,83 +5,54 @@ import {
   TrendingUp, Smartphone, Calendar, LogIn, ArrowLeft, CreditCard,
   AlertTriangle, CheckCircle, Clock, FileText, Bell, Wifi, WifiOff,
   Server, Database, Send, Shield, Link2, Copy, ExternalLink, BarChart3,
-  Loader2, HardDrive, Download, Play
+  Loader2, HardDrive, Download, Play, ShieldAlert, Ban
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import toast from 'react-hot-toast'
 
-const SUPERADMIN_PASSWORD = 'CoachAI2024!' // Password temporanea - da cambiare in produzione
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function SuperAdmin() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const { authFetch } = useAuth()
+  const [accessDenied, setAccessDenied] = useState(false)
+  const [checking, setChecking] = useState(true)
 
-  // Check if already authenticated
+  // Verifica accesso superadmin al caricamento
   useEffect(() => {
-    const auth = sessionStorage.getItem('superadmin_auth')
-    if (auth === 'true') {
-      setIsAuthenticated(true)
+    const checkAccess = async () => {
+      try {
+        const res = await authFetch(`${API_URL}/api/superadmin/tenants`)
+        if (res.status === 403) {
+          setAccessDenied(true)
+        }
+      } catch (err) {
+        setAccessDenied(true)
+      }
+      setChecking(false)
     }
-  }, [])
+    checkAccess()
+  }, [authFetch])
 
-  const handleLogin = (e) => {
-    e.preventDefault()
-    if (password === SUPERADMIN_PASSWORD) {
-      setIsAuthenticated(true)
-      sessionStorage.setItem('superadmin_auth', 'true')
-      setError('')
-    } else {
-      setError('Password non valida')
-    }
-  }
-
-  const handleLogout = () => {
-    setIsAuthenticated(false)
-    sessionStorage.removeItem('superadmin_auth')
-  }
-
-  if (!isAuthenticated) {
+  if (checking) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Building2 className="w-8 h-8 text-white" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900">Super Admin</h1>
-            <p className="text-gray-500 mt-2">Accesso riservato agli amministratori</p>
+        <Loader2 className="w-8 h-8 animate-spin text-white" />
+      </div>
+    )
+  }
+
+  if (accessDenied) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md text-center">
+          <div className="w-16 h-16 bg-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <ShieldAlert className="w-8 h-8 text-white" />
           </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
-                placeholder="Inserisci la password"
-              />
-            </div>
-
-            {error && (
-              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full bg-red-500 text-white py-3 rounded-lg font-medium hover:bg-red-600 transition-colors"
-            >
-              Accedi
-            </button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <Link to="/" className="text-sm text-gray-500 hover:text-gray-700">
+          <h1 className="text-2xl font-bold text-gray-900">Accesso Negato</h1>
+          <p className="text-gray-500 mt-2">Non hai i permessi di superadmin per accedere a questa sezione.</p>
+          <div className="mt-6">
+            <Link to="/" className="text-sm text-red-500 hover:text-red-700 font-medium">
               Torna alla dashboard
             </Link>
           </div>
@@ -90,10 +61,12 @@ function SuperAdmin() {
     )
   }
 
-  return <SuperAdminDashboard onLogout={handleLogout} />
+  return <SuperAdminDashboard />
 }
 
-function SuperAdminDashboard({ onLogout }) {
+function SuperAdminDashboard() {
+  const { authFetch, logout } = useAuth()
+  const onLogout = logout
   const [activeTab, setActiveTab] = useState('tenants') // 'tenants' or 'monitoring'
   const [tenants, setTenants] = useState([])
   const [globalStats, setGlobalStats] = useState({
@@ -146,7 +119,7 @@ function SuperAdminDashboard({ onLogout }) {
     setLoading(true)
     try {
       // Fetch all tenants
-      const tenantsRes = await fetch('/api/superadmin/tenants')
+      const tenantsRes = await authFetch(`${API_URL}/api/superadmin/tenants`)
       if (tenantsRes.ok) {
         const data = await tenantsRes.json()
         setTenants(data.tenants || [])
@@ -167,9 +140,9 @@ function SuperAdminDashboard({ onLogout }) {
     setMonitoringLoading(true)
     try {
       const [statsRes, healthRes, alertsRes] = await Promise.all([
-        fetch('/api/monitoring/stats'),
-        fetch('/api/monitoring/health'),
-        fetch('/api/monitoring/alerts?limit=20')
+        authFetch(`${API_URL}/api/monitoring/stats`),
+        authFetch(`${API_URL}/api/monitoring/health`),
+        authFetch(`${API_URL}/api/monitoring/alerts?limit=20`)
       ])
 
       if (statsRes.ok) setMonitoringStats(await statsRes.json())
@@ -186,20 +159,20 @@ function SuperAdminDashboard({ onLogout }) {
 
   const testTelegram = async () => {
     try {
-      const res = await fetch('/api/monitoring/test-telegram', { method: 'POST' })
+      const res = await authFetch(`${API_URL}/api/monitoring/test-telegram`, { method: 'POST' })
       if (res.ok) {
-        alert('Test alert inviato a Telegram!')
+        toast.success('Test alert inviato a Telegram!')
       } else {
-        alert('Errore nell\'invio del test')
+        toast.error('Errore nell\'invio del test')
       }
     } catch (err) {
-      alert('Errore: ' + err.message)
+      toast.error('Errore: ' + err.message)
     }
   }
 
   const acknowledgeAlert = async (alertId) => {
     try {
-      await fetch(`/api/monitoring/alerts/${alertId}/acknowledge`, { method: 'POST' })
+      await authFetch(`${API_URL}/api/monitoring/alerts/${alertId}/acknowledge`, { method: 'POST' })
       fetchMonitoringData()
     } catch (err) {
       console.error('Error acknowledging alert:', err)
@@ -209,10 +182,7 @@ function SuperAdminDashboard({ onLogout }) {
   const fetchAnalyticsData = async () => {
     setAnalyticsLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch('/api/superadmin/analytics', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
+      const res = await authFetch(`${API_URL}/api/superadmin/analytics`)
       if (res.ok) {
         const data = await res.json()
         setGlobalAnalytics(data)
@@ -228,24 +198,20 @@ function SuperAdminDashboard({ onLogout }) {
 
     setBackfillingAll(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch('/api/superadmin/analytics/backfill-all', {
+      const res = await authFetch(`${API_URL}/api/superadmin/analytics/backfill-all`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ days: 30 })
       })
 
       if (res.ok) {
-        alert('Statistiche ricalcolate per tutte le palestre!')
+        toast.success('Statistiche ricalcolate per tutte le palestre!')
         fetchAnalyticsData()
       } else {
         throw new Error('Errore backfill')
       }
     } catch (err) {
-      alert('Errore: ' + err.message)
+      toast.error('Errore: ' + err.message)
     }
     setBackfillingAll(false)
   }
@@ -253,7 +219,7 @@ function SuperAdminDashboard({ onLogout }) {
   const fetchBackupData = async () => {
     setBackupLoading(true)
     try {
-      const res = await fetch('/api/superadmin/backups')
+      const res = await authFetch(`${API_URL}/api/superadmin/backups`)
       if (res.ok) {
         const data = await res.json()
         setBackupStats(data.stats)
@@ -270,23 +236,62 @@ function SuperAdminDashboard({ onLogout }) {
 
     setRunningBackup(true)
     try {
-      const res = await fetch('/api/superadmin/backups/run', { method: 'POST' })
+      const res = await authFetch(`${API_URL}/api/superadmin/backups/run`, { method: 'POST' })
       const data = await res.json()
 
       if (data.success) {
-        alert(`Backup completato!\nFile: ${data.filename}\nDimensione: ${(data.size / 1024 / 1024).toFixed(2)} MB`)
+        toast.success(`Backup completato!\nFile: ${data.filename}\nDimensione: ${(data.size / 1024 / 1024).toFixed(2)} MB`)
         fetchBackupData()
       } else {
         throw new Error(data.error || 'Errore backup')
       }
     } catch (err) {
-      alert('Errore: ' + err.message)
+      toast.error('Errore: ' + err.message)
     }
     setRunningBackup(false)
   }
 
-  const downloadBackup = (filename) => {
-    window.open(`/api/superadmin/backups/download/${filename}`, '_blank')
+  const downloadBackup = async (filename) => {
+    try {
+      const res = await authFetch(`${API_URL}/api/superadmin/backups/download/${filename}`)
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      } else {
+        toast.error('Errore download backup')
+      }
+    } catch (err) {
+      toast.error('Errore: ' + err.message)
+    }
+  }
+
+  const handleStatusChange = async (tenantId, newStatus) => {
+    if (!window.confirm(`Sei sicuro di voler ${newStatus === 'suspended' ? 'sospendere' : 'riattivare'} questa palestra?`)) return
+
+    try {
+      const res = await authFetch(`${API_URL}/api/superadmin/tenants/${tenantId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      })
+
+      if (res.ok) {
+        toast.success(`Palestra ${newStatus === 'suspended' ? 'sospesa' : 'riattivata'} con successo!`)
+        fetchTenants()
+      } else {
+        const errData = await res.json()
+        throw new Error(errData.error || 'Errore')
+      }
+    } catch (err) {
+      toast.error('Errore aggiornamento stato: ' + err.message)
+    }
   }
 
   const handleDeleteTenant = async (tenantId) => {
@@ -295,7 +300,7 @@ function SuperAdminDashboard({ onLogout }) {
     }
 
     try {
-      const res = await fetch(`/api/superadmin/tenants/${tenantId}`, {
+      const res = await authFetch(`${API_URL}/api/superadmin/tenants/${tenantId}`, {
         method: 'DELETE'
       })
       if (res.ok) {
@@ -331,36 +336,32 @@ function SuperAdminDashboard({ onLogout }) {
             <div className="flex bg-gray-800 rounded-lg p-1">
               <button
                 onClick={() => setActiveTab('tenants')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === 'tenants' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
-                }`}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'tenants' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
               >
                 <Building2 className="w-4 h-4 inline mr-2" />
                 Palestre
               </button>
               <button
                 onClick={() => setActiveTab('monitoring')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === 'monitoring' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
-                }`}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'monitoring' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
               >
                 <Shield className="w-4 h-4 inline mr-2" />
                 Monitoring
               </button>
               <button
                 onClick={() => setActiveTab('analytics')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === 'analytics' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
-                }`}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'analytics' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
               >
                 <BarChart3 className="w-4 h-4 inline mr-2" />
                 Analytics
               </button>
               <button
                 onClick={() => setActiveTab('backups')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === 'backups' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
-                }`}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'backups' ? 'bg-red-500 text-white' : 'text-gray-400 hover:text-white'
+                  }`}
               >
                 <HardDrive className="w-4 h-4 inline mr-2" />
                 Backup
@@ -428,8 +429,9 @@ function SuperAdminDashboard({ onLogout }) {
                     <button
                       onClick={() => fetchData()}
                       className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                      title="Aggiorna stato WhatsApp"
                     >
-                      <RefreshCw className="w-5 h-5" />
+                      <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
                     </button>
                     <button
                       onClick={() => setShowCreateModal(true)}
@@ -466,6 +468,7 @@ function SuperAdminDashboard({ onLogout }) {
                       }}
                       onDelete={() => handleDeleteTenant(tenant.id)}
                       onImpersonate={() => handleImpersonate(tenant)}
+                      onStatusChange={(status) => handleStatusChange(tenant.id, status)}
                     />
                   ))}
                 </div>
@@ -537,11 +540,10 @@ function SuperAdminDashboard({ onLogout }) {
                       {healthStatus.whatsappConnections?.map((t, i) => (
                         <div key={i} className="flex items-center justify-between py-1">
                           <span className="text-sm text-gray-700">{t.name}</span>
-                          <span className={`text-xs px-2 py-1 rounded-full ${
-                            t.connected
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-red-100 text-red-700'
-                          }`}>
+                          <span className={`text-xs px-2 py-1 rounded-full ${t.connected
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-red-100 text-red-700'
+                            }`}>
                             {t.connected ? 'Connesso' : t.reason || 'Disconnesso'}
                           </span>
                         </div>
@@ -624,10 +626,9 @@ function SuperAdminDashboard({ onLogout }) {
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
-                            <span className={`w-2 h-2 rounded-full ${
-                              alert.severity === 'error' ? 'bg-red-500' :
+                            <span className={`w-2 h-2 rounded-full ${alert.severity === 'error' ? 'bg-red-500' :
                               alert.severity === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'
-                            }`} />
+                              }`} />
                             <span className="font-medium text-gray-900">{alert.title}</span>
                             {alert.acknowledged && (
                               <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
@@ -708,11 +709,10 @@ function SuperAdminDashboard({ onLogout }) {
                             </div>
                           </td>
                           <td className="px-4 py-4 text-center">
-                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                              tenant.whatsapp_connected
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-red-100 text-red-700'
-                            }`}>
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${tenant.whatsapp_connected
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-red-100 text-red-700'
+                              }`}>
                               {tenant.whatsapp_connected ? (
                                 <><Wifi className="w-3 h-3" /> Online</>
                               ) : (
@@ -730,27 +730,25 @@ function SuperAdminDashboard({ onLogout }) {
                             {tenant.total_checkins || 0}
                           </td>
                           <td className="px-4 py-4 text-right">
-                            <span className={`font-medium ${
-                              (tenant.messages_7d || 0) > 0 ? 'text-green-600' : 'text-gray-400'
-                            }`}>
+                            <span className={`font-medium ${(tenant.messages_7d || 0) > 0 ? 'text-green-600' : 'text-gray-400'
+                              }`}>
                               {tenant.messages_7d || 0}
                             </span>
                           </td>
                           <td className="px-4 py-4 text-right">
-                            <span className={`font-medium ${
-                              (tenant.checkins_7d || 0) > 0 ? 'text-blue-600' : 'text-gray-400'
-                            }`}>
+                            <span className={`font-medium ${(tenant.checkins_7d || 0) > 0 ? 'text-blue-600' : 'text-gray-400'
+                              }`}>
                               {tenant.checkins_7d || 0}
                             </span>
                           </td>
                           <td className="px-4 py-4 text-right text-sm text-gray-500">
                             {tenant.last_message_at
                               ? new Date(tenant.last_message_at).toLocaleDateString('it-IT', {
-                                  day: '2-digit',
-                                  month: 'short',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })
+                                day: '2-digit',
+                                month: 'short',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })
                               : '-'
                             }
                           </td>
@@ -860,11 +858,11 @@ function SuperAdminDashboard({ onLogout }) {
                           <p className="text-lg font-bold text-gray-900">
                             {backupStats.newestBackup
                               ? new Date(backupStats.newestBackup).toLocaleDateString('it-IT', {
-                                  day: '2-digit',
-                                  month: 'short',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })
+                                day: '2-digit',
+                                month: 'short',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })
                               : 'Mai'
                             }
                           </p>
@@ -923,9 +921,8 @@ function SuperAdminDashboard({ onLogout }) {
                               })}
                             </td>
                             <td className="px-6 py-4">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                idx === 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
-                              }`}>
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${idx === 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                                }`}>
                                 {backup.age}
                               </span>
                             </td>
@@ -1023,9 +1020,8 @@ function HealthItem({ icon: Icon, label, status }) {
         <Icon className={`w-5 h-5 ${isOnline ? 'text-green-600' : 'text-red-600'}`} />
         <span className="font-medium text-gray-900">{label}</span>
       </div>
-      <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${
-        isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-      }`}>
+      <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+        }`}>
         {isOnline ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
         <span className="text-sm font-medium">{isOnline ? 'Online' : 'Offline'}</span>
       </div>
@@ -1033,7 +1029,8 @@ function HealthItem({ icon: Icon, label, status }) {
   )
 }
 
-function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImpersonate, onGenerateOnboarding }) {
+function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImpersonate, onGenerateOnboarding, onStatusChange }) {
+  const { authFetch } = useAuth()
   const [onboardingUrl, setOnboardingUrl] = useState(null)
   const [loadingOnboarding, setLoadingOnboarding] = useState(false)
   const [showOnboardingModal, setShowOnboardingModal] = useState(false)
@@ -1041,7 +1038,7 @@ function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImper
   const generateOnboarding = async () => {
     setLoadingOnboarding(true)
     try {
-      const res = await fetch(`/api/superadmin/tenants/${tenant.id}/onboarding`, {
+      const res = await authFetch(`${API_URL}/api/superadmin/tenants/${tenant.id}/onboarding`, {
         method: 'POST'
       })
       if (res.ok) {
@@ -1049,17 +1046,17 @@ function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImper
         setOnboardingUrl(data.url)
         setShowOnboardingModal(true)
       } else {
-        alert('Errore nella generazione del link')
+        toast.error('Errore nella generazione del link')
       }
     } catch (err) {
-      alert('Errore: ' + err.message)
+      toast.error('Errore: ' + err.message)
     }
     setLoadingOnboarding(false)
   }
 
   const checkOnboarding = async () => {
     try {
-      const res = await fetch(`/api/superadmin/tenants/${tenant.id}/onboarding`)
+      const res = await authFetch(`${API_URL}/api/superadmin/tenants/${tenant.id}/onboarding`)
       if (res.ok) {
         const data = await res.json()
         if (data.hasOnboarding && data.status !== 'completed' && data.status !== 'expired') {
@@ -1076,7 +1073,7 @@ function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImper
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text)
-    alert('Link copiato!')
+    toast.success('Link copiato!')
   }
 
   return (
@@ -1141,6 +1138,15 @@ function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImper
           >
             <Edit className="w-5 h-5" />
           </button>
+          {onStatusChange && (
+            <button
+              onClick={() => onStatusChange((tenant.subscriptionStatus || tenant.subscription_status) === 'suspended' ? 'active' : 'suspended')}
+              className={`p-2 rounded-lg ${(tenant.subscriptionStatus || tenant.subscription_status) === 'suspended' ? 'text-green-600 hover:bg-green-50' : 'text-orange-600 hover:bg-orange-50'}`}
+              title={(tenant.subscriptionStatus || tenant.subscription_status) === 'suspended' ? 'Riattiva Palestra' : 'Sospendi Palestra (Morosità)'}
+            >
+              {(tenant.subscriptionStatus || tenant.subscription_status) === 'suspended' ? <CheckCircle className="w-5 h-5" /> : <Ban className="w-5 h-5" />}
+            </button>
+          )}
           <button
             onClick={onDelete}
             className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
@@ -1216,11 +1222,10 @@ function TenantRow({ tenant, expanded, onToggleExpand, onEdit, onDelete, onImper
               </div>
               <div>
                 <p className="text-xs text-blue-600 uppercase tracking-wide mb-1">Stato</p>
-                <p className={`font-semibold capitalize ${
-                  (tenant.subscriptionStatus || tenant.subscription_status) === 'active' ? 'text-green-600' :
+                <p className={`font-semibold capitalize ${(tenant.subscriptionStatus || tenant.subscription_status) === 'active' ? 'text-green-600' :
                   (tenant.subscriptionStatus || tenant.subscription_status) === 'suspended' ? 'text-orange-600' :
-                  'text-red-600'
-                }`}>
+                    'text-red-600'
+                  }`}>
                   {tenant.subscriptionStatus || tenant.subscription_status || 'active'}
                 </p>
               </div>
@@ -1315,6 +1320,7 @@ function SubscriptionBadge({ tenant }) {
 }
 
 function TenantModal({ tenant, onClose, onSave }) {
+  const { authFetch } = useAuth()
   const [formData, setFormData] = useState({
     name: tenant?.name || '',
     slug: tenant?.slug || '',
@@ -1338,10 +1344,10 @@ function TenantModal({ tenant, onClose, onSave }) {
 
     try {
       const url = tenant
-        ? `/api/superadmin/tenants/${tenant.id}`
-        : '/api/superadmin/tenants'
+        ? `${API_URL}/api/superadmin/tenants/${tenant.id}`
+        : `${API_URL}/api/superadmin/tenants`
 
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         method: tenant ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -1386,11 +1392,10 @@ function TenantModal({ tenant, onClose, onSave }) {
             <button
               type="button"
               onClick={() => setActiveTab('general')}
-              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'general'
-                  ? 'border-red-500 text-red-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'general'
+                ? 'border-red-500 text-red-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
             >
               <Building2 className="w-4 h-4 inline mr-2" />
               Generale
@@ -1398,11 +1403,10 @@ function TenantModal({ tenant, onClose, onSave }) {
             <button
               type="button"
               onClick={() => setActiveTab('subscription')}
-              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'subscription'
-                  ? 'border-red-500 text-red-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'subscription'
+                ? 'border-red-500 text-red-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
             >
               <CreditCard className="w-4 h-4 inline mr-2" />
               Abbonamento

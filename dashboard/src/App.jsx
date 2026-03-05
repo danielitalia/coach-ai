@@ -10,6 +10,8 @@ import {
 import { AuthProvider, useAuth } from './context/AuthContext'
 import LoginPage from './components/LoginPage'
 import RegisterPage from './components/RegisterPage'
+import ForgotPassword from './components/ForgotPassword'
+import ResetPassword from './components/ResetPassword'
 import ClientList from './components/ClientList'
 import Conversations from './components/Conversations'
 import Analytics from './components/Analytics'
@@ -85,7 +87,7 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
       <aside className={`
         fixed top-0 left-0 z-30 h-full w-64 bg-white border-r border-gray-200
         transform transition-transform duration-200 ease-in-out
-        lg:translate-x-0 lg:static flex flex-col
+        lg:translate-x-0 lg:fixed flex flex-col
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         <div className="flex items-center gap-3 p-6 border-b border-gray-200">
@@ -115,6 +117,8 @@ function Sidebar({ isOpen, setIsOpen, whatsappStatus }) {
               <span className="font-medium">{label}</span>
             </Link>
           ))}
+
+
         </nav>
 
         {/* WhatsApp Status */}
@@ -365,28 +369,26 @@ function MainLayout() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex">
       <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} whatsappStatus={whatsappStatus} />
 
       {/* Main content */}
-      <div className="lg:ml-64">
-        {/* Top bar */}
-        <header className="bg-white border-b border-gray-200 px-4 py-4 lg:px-8">
+      <div className="flex-1 min-w-0 flex flex-col lg:ml-64">
+        {/* Top bar - solo mobile */}
+        <header className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 shrink-0">
           <div className="flex items-center justify-between">
             <button
-              className="lg:hidden p-2 hover:bg-gray-100 rounded-lg"
+              className="p-2 hover:bg-gray-100 rounded-lg"
               onClick={() => setSidebarOpen(true)}
             >
               <Menu className="w-6 h-6 text-gray-600" />
             </button>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-500">{tenant?.name || 'Coach AI'}</span>
-            </div>
+            <span className="text-sm text-gray-500">{tenant?.name || 'Coach AI'}</span>
           </div>
         </header>
 
         {/* Page content */}
-        <main className="p-4 lg:p-8">
+        <main className="flex-1 p-4 lg:p-6">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/clients" element={<ClientList />} />
@@ -443,6 +445,8 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPageWrapper />} />
           <Route path="/register" element={<RegisterPageWrapper />} />
+          <Route path="/forgot-password" element={<ForgotPasswordWrapper />} />
+          <Route path="/reset-password" element={<ResetPasswordWrapper />} />
           <Route path="/superadmin" element={<ProtectedRoute><SuperAdmin /></ProtectedRoute>} />
           <Route path="/onboarding/:token" element={<OnboardingWizard />} />
           <Route path="/*" element={<RootRoute />} />
@@ -488,6 +492,44 @@ function RegisterPageWrapper() {
   }
 
   return <RegisterPage />
+}
+
+// Wrapper per la pagina forgot password
+function ForgotPasswordWrapper() {
+  const { isAuthenticated, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />
+  }
+
+  return <ForgotPassword />
+}
+
+// Wrapper per la pagina reset password
+function ResetPasswordWrapper() {
+  const { isAuthenticated, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    )
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />
+  }
+
+  return <ResetPassword />
 }
 
 export default App

@@ -10,11 +10,13 @@ import {
   PieChart, Pie, Cell
 } from 'recharts'
 
-const API_BASE = window.location.hostname === 'localhost'
-  ? 'http://localhost:3000'
-  : 'https://coachpalestra.it'
+import { useAuth } from '../context/AuthContext'
+import toast from 'react-hot-toast'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function Analytics() {
+  const { authFetch } = useAuth()
   const [summary, setSummary] = useState(null)
   const [timeline, setTimeline] = useState([])
   const [loading, setLoading] = useState(true)
@@ -25,15 +27,10 @@ function Analytics() {
   const fetchData = async () => {
     try {
       setLoading(true)
-      const token = localStorage.getItem('token')
 
       const [summaryRes, timelineRes] = await Promise.all([
-        fetch(`${API_BASE}/api/analytics/summary?days=${period}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_BASE}/api/analytics/timeline?days=${period}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
+        authFetch(`${API_URL}/api/analytics/summary?days=${period}`),
+        authFetch(`${API_URL}/api/analytics/timeline?days=${period}`)
       ])
 
       if (!summaryRes.ok || !timelineRes.ok) throw new Error('Errore caricamento dati')
@@ -61,11 +58,9 @@ function Analytics() {
 
     setBackfilling(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/analytics/backfill`, {
+      const res = await authFetch(`${API_URL}/api/analytics/backfill`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ days: period })
@@ -74,9 +69,9 @@ function Analytics() {
       if (!res.ok) throw new Error('Errore backfill')
 
       await fetchData()
-      alert('Statistiche ricalcolate con successo!')
+      toast.success('Statistiche ricalcolate con successo!')
     } catch (err) {
-      alert('Errore durante il ricalcolo: ' + err.message)
+      toast.error('Errore durante il ricalcolo: ' + err.message)
     } finally {
       setBackfilling(false)
     }
@@ -376,10 +371,10 @@ function KPICard({ title, value, subtitle, icon: Icon, color, trend }) {
   }
 
   const TrendIcon = trend?.direction === 'up' ? ArrowUpRight :
-                    trend?.direction === 'down' ? ArrowDownRight : Minus
+    trend?.direction === 'down' ? ArrowDownRight : Minus
 
   const trendColor = trend?.direction === 'up' ? 'text-green-500' :
-                     trend?.direction === 'down' ? 'text-red-500' : 'text-gray-400'
+    trend?.direction === 'down' ? 'text-red-500' : 'text-gray-400'
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">

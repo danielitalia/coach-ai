@@ -86,10 +86,14 @@ async function scoreClient(tenantId, phone, db) {
   // 4. Calcola metriche
   const now = new Date();
 
-  // --- Giorni dall'ultimo check-in ---
+  // --- Giorni dall'ultima attività (check-in O messaggio) ---
   const lastCheckin = checkins.length > 0 ? new Date(checkins[0].checked_in_at) : null;
-  const daysSinceLastCheckin = lastCheckin
-    ? Math.floor((now - lastCheckin) / (1000 * 60 * 60 * 24))
+  const lastUserMessage = userMessages.length > 0 ? new Date(userMessages[0].created_at) : null;
+  const lastActivity = lastCheckin && lastUserMessage
+    ? new Date(Math.max(lastCheckin.getTime(), lastUserMessage.getTime()))
+    : lastCheckin || lastUserMessage || null;
+  const daysSinceLastCheckin = lastActivity
+    ? Math.floor((now - lastActivity) / (1000 * 60 * 60 * 24))
     : 999;
 
   // --- Check-in ultimi 30 giorni ---

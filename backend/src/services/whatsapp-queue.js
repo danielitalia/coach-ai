@@ -1,8 +1,11 @@
 const { Queue, Worker } = require('bullmq');
 const axios = require('axios');
 
-const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '429683C4C977415CAAFCCE10F7D57E11';
+const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
+if (!EVOLUTION_API_KEY) {
+  console.warn('[WhatsApp Queue] EVOLUTION_API_KEY not set - message sending will fail');
+}
 
 // Setup la connettività Redis per BullMQ
 const redisOptions = {

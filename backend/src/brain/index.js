@@ -23,15 +23,15 @@ let isRunning = false;
 /**
  * Inizializza il Brain
  */
-function init(database, sendMessage, aiClient, aiModel, isAnthropic) {
+function init(database, sendMessage, aiClient, aiModel, isAnthropic, enqueueFn) {
   if (!database || !sendMessage) {
     console.error('[Brain] ❌ Init FAILED: database and sendMessage are required');
     return;
   }
   db = database;
   sendWhatsAppMessage = sendMessage;
-  actions.initAI(aiClient, aiModel, isAnthropic);
-  console.log('[Brain] 🧠 Module initialized');
+  actions.initAI(aiClient, aiModel, isAnthropic, enqueueFn);
+  console.log('[Brain] 🧠 Module initialized' + (enqueueFn ? ' (with BullMQ)' : ' (direct send)'));
 }
 
 /**
@@ -55,7 +55,10 @@ async function runBrainCycle() {
   try {
     // Step 1: Scoring per tutti i tenant
     const tenantsResult = await db.pool.query(`
-      SELECT * FROM tenants WHERE whatsapp_connected = true AND whatsapp_instance_name IS NOT NULL
+      SELECT * FROM tenants 
+      WHERE whatsapp_connected = true 
+      AND whatsapp_instance_name IS NOT NULL
+      AND (subscription_status = 'active' OR subscription_status IS NULL)
     `);
     const tenants = tenantsResult.rows;
 
@@ -63,6 +66,13 @@ async function runBrainCycle() {
 
     for (const tenant of tenants) {
       try {
+        // Check se il brain è abilitato per questo tenant
+        const settings = await actions.getSettings(tenant.id, db);
+        if (!settings.brain_enabled) {
+          console.log(`[Brain] ${tenant.name}: Brain DISABILITATO, skip scoring`);
+          continue;
+        }
+
         // Scoring
         const scoreResult = await scoring.scoreAllClients(tenant.id, db);
         console.log(`[Brain] ${tenant.name}: scored ${scoreResult.scored} clients`);
@@ -132,13 +142,14 @@ async function analyzeMessage(tenantId, phone, text) {
 async function getOverview(tenantId) {
   if (!db) return null;
 
-  const [scoringOverview, signalStats, actionStats, atRiskClients, allScores, recentActions] = await Promise.all([
+  const [scoringOverview, signalStats, actionStats, atRiskClients, allScores, recentActions, recoveryStats] = await Promise.all([
     scoring.getScoringOverview(tenantId, db),
     analyzer.getSignalStats(tenantId, db, 30),
     actions.getActionStats(tenantId, db, 30),
     scoring.getAtRiskClients(tenantId, db, 0.6),
     scoring.getAllClientScores(tenantId, db),
-    actions.getRecentActions(tenantId, db, 30)
+    actions.getRecentActions(tenantId, db, 30),
+    db.getRecoveryStats(tenantId, 30)
   ]);
 
   return {
@@ -147,8 +158,61 @@ async function getOverview(tenantId) {
     actions: actionStats,
     atRiskClients,
     allScores,
-    recentActions
+    recentActions,
+    recoveryStats
   };
+}
+
+/**
+ * API: Recupera settings Brain per un tenant
+ */
+async function getBrainSettings(tenantId) {
+  if (!db) return actions.DEFAULT_SETTINGS;
+  return await actions.getSettings(tenantId, db);
+}
+
+/**
+ * API: Aggiorna settings Brain per un tenant
+ */
+async function updateBrainSettings(tenantId, newSettings) {
+  if (!db) throw new Error('Brain not initialized');
+
+  // Lista dei campi aggiornabili (whitelist)
+  const allowedFields = [
+    'brain_enabled',
+    'max_messages_per_day', 'max_messages_per_client_per_week', 'min_hours_between_messages',
+    'quiet_hours_start', 'quiet_hours_end',
+    'churn_threshold_high', 'churn_threshold_medium',
+    'inactivity_days_high', 'inactivity_days_support_max',
+    'streak_recovery_min_days', 'streak_recovery_max_days',
+    'engagement_threshold', 'consistency_threshold_progress', 'consistency_threshold_streak',
+    'min_checkins_for_progress', 'check_progress_interval_days',
+    'delay_between_messages_ms'
+  ];
+
+  // Filtra solo i campi permessi
+  const updates = {};
+  for (const key of allowedFields) {
+    if (newSettings[key] !== undefined) {
+      updates[key] = newSettings[key];
+    }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return await getBrainSettings(tenantId);
+  }
+
+  // Upsert: inserisci se non esiste, aggiorna se esiste
+  const setClauses = Object.keys(updates).map((key, i) => `${key} = $${i + 2}`);
+  const values = Object.values(updates);
+
+  await db.pool.query(`
+    INSERT INTO brain_settings (tenant_id, ${Object.keys(updates).join(', ')})
+    VALUES ($1, ${values.map((_, i) => `$${i + 2}`).join(', ')})
+    ON CONFLICT (tenant_id) DO UPDATE SET ${setClauses.join(', ')}
+  `, [tenantId, ...values]);
+
+  return await getBrainSettings(tenantId);
 }
 
 /**
@@ -167,6 +231,8 @@ module.exports = {
   runNow,
   analyzeMessage,
   getOverview,
+  getBrainSettings,
+  updateBrainSettings,
   getStatus,
   // Esporta anche i sotto-moduli per accesso diretto
   scoring,

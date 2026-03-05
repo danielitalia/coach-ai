@@ -13,7 +13,7 @@ function renderTemplate(template, variables = {}) {
 
   for (const [key, value] of Object.entries(variables)) {
     const placeholder = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
-    message = message.replace(placeholder, value || '');
+    message = message.replace(placeholder, value !== undefined && value !== null ? value : '');
   }
 
   // Remove any unreplaced placeholders
@@ -28,12 +28,23 @@ function renderTemplate(template, variables = {}) {
  * @param {object} tenant - Tenant object
  * @returns {object} - Default variables
  */
-function getDefaultVariables(client, tenant) {
+async function getDefaultVariables(client, tenant, db = null) {
+  let referralCode = '';
+
+  if (db && client.phone && tenant.id) {
+    try {
+      referralCode = await db.createReferralCode(tenant.id, client.phone);
+    } catch (error) {
+      console.error('[Templates] Error getting referral code:', error.message);
+    }
+  }
+
   return {
     client_name: client.name || 'Campione',
     gym_name: tenant.name || 'la palestra',
     coach_name: tenant.coach_name || 'Coach AI',
     phone: client.phone,
+    referral_code: referralCode,
   };
 }
 

@@ -1,7 +1,11 @@
 const jwt = require('jsonwebtoken');
 const db = require('../../db/database-multitenant');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is required');
+  process.exit(1);
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = '15m';
 const REFRESH_TOKEN_EXPIRES_IN = '7d';
 
@@ -110,6 +114,10 @@ async function requireTenant(req, res, next) {
       return res.status(404).json({ error: 'Utente o tenant non trovato' });
     }
 
+    if (tenant.subscription_status === 'suspended') {
+      return res.status(403).json({ error: 'La palestra è temporaneamente sospesa. Contatta l\'assistenza per riattivare l\'account.' });
+    }
+
     req.user = user;
     req.tenant = tenant;
     req.tenantId = tenantId;
@@ -179,6 +187,10 @@ async function identifyTenantFromWhatsApp(req, res, next) {
     if (data.instance) {
       const tenant = await db.getTenantByInstanceName(data.instance);
       if (tenant) {
+        if (tenant.subscription_status === 'suspended') {
+          console.warn(`[Suspended] Webhook ignorato per tenant sospeso: ${tenant.name}`);
+          return res.status(403).json({ error: 'Tenant suspended' });
+        }
         req.tenant = tenant;
         req.tenantId = tenant.id;
         return next();
@@ -193,6 +205,10 @@ async function identifyTenantFromWhatsApp(req, res, next) {
     if (whatsappNumber) {
       const tenant = await db.getTenantByWhatsApp(whatsappNumber);
       if (tenant) {
+        if (tenant.subscription_status === 'suspended') {
+          console.warn(`[Suspended] Webhook ignorato per tenant sospeso: ${tenant.name}`);
+          return res.status(403).json({ error: 'Tenant suspended' });
+        }
         req.tenant = tenant;
         req.tenantId = tenant.id;
         return next();

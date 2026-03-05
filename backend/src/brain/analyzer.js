@@ -84,6 +84,40 @@ const SIGNALS = {
   }
 };
 
+// Pattern per estrazione nomi da messaggi in italiano
+const NAME_PATTERNS = [
+  /(?:mi chiamo|sono|io sono|chiamami)\s+([A-ZÀ-Ú][a-zà-ú]{2,15})/i,
+  /(?:ciao|hey|ehi),?\s+(?:sono|mi chiamo)\s+([A-ZÀ-Ú][a-zà-ú]{2,15})/i,
+  /(?:il mio nome è|nome:?)\s+([A-ZÀ-Ú][a-zà-ú]{2,15})/i,
+];
+
+// Nomi comuni da escludere (parole che matchano i pattern ma non sono nomi)
+const NAME_BLACKLIST = new Set([
+  'sono', 'ciao', 'coach', 'pronto', 'stanco', 'contento',
+  'felice', 'motivato', 'arrabbiato', 'triste', 'bene', 'male',
+  'nuovo', 'vecchio', 'grande', 'piccolo', 'alto', 'basso'
+]);
+
+/**
+ * Tenta di estrarre il nome del cliente da un messaggio
+ * @param {string} text - Testo del messaggio
+ * @returns {string|null} Nome estratto o null
+ */
+function extractName(text) {
+  if (!text || typeof text !== 'string') return null;
+
+  for (const pattern of NAME_PATTERNS) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const name = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+      if (!NAME_BLACKLIST.has(name.toLowerCase()) && name.length >= 3) {
+        return name;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Analizza un messaggio del cliente e ritorna i segnali trovati
  * @param {string} text - Testo del messaggio
@@ -125,6 +159,29 @@ function analyzeMessage(text) {
  * @param {object} db - Database module
  */
 async function processAndSave(tenantId, phone, text, db) {
+  // Tenta estrazione nome (solo se il profilo non ha già un nome)
+  try {
+    const name = extractName(text);
+    if (name) {
+      const existing = await db.pool.query(
+        'SELECT name FROM client_profiles WHERE tenant_id = $1 AND phone = $2',
+        [tenantId, phone]
+      );
+      if (existing.rows.length === 0 || !existing.rows[0].name) {
+        await db.pool.query(`
+          INSERT INTO client_profiles (tenant_id, phone, name)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (tenant_id, phone) DO UPDATE SET name = $3
+          WHERE client_profiles.name IS NULL
+        `, [tenantId, phone, name]);
+        console.log(`[Brain:Analyzer] 👤 Nome estratto per ${phone}: ${name}`);
+      }
+    }
+  } catch (err) {
+    // Non bloccare l'analisi se l'estrazione nome fallisce
+    console.error(`[Brain:Analyzer] Errore estrazione nome:`, err.message);
+  }
+
   const signals = analyzeMessage(text);
 
   if (signals.length === 0) return null;
@@ -219,6 +276,7 @@ async function getSignalStats(tenantId, db, days = 30) {
 
 module.exports = {
   analyzeMessage,
+  extractName,
   processAndSave,
   getRecentSignals,
   getSignalStats,

@@ -188,12 +188,29 @@ router.post('/refresh', async (req, res) => {
 
     // Ottieni tenant
     const tenants = await db.getUserTenants(user.id);
-    const tenantId = req.headers['x-tenant-id'] || tenants[0]?.id;
+    const defaultTenant = tenants[0];
+    const tenantId = req.headers['x-tenant-id'] || defaultTenant?.id;
 
-    // Genera nuovo access token
+    // Genera nuovo access token e nuovo refresh token
     const accessToken = generateAccessToken(user, tenantId);
+    const newRefreshToken = generateRefreshToken(user);
 
-    res.json({ accessToken });
+    res.json({
+      accessToken,
+      refreshToken: newRefreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        is_superadmin: user.is_superadmin
+      },
+      tenant: defaultTenant ? {
+        id: defaultTenant.id,
+        name: defaultTenant.name,
+        slug: defaultTenant.slug,
+        role: defaultTenant.role
+      } : null
+    });
   } catch (error) {
     console.error('Refresh error:', error);
     res.status(500).json({ error: 'Errore refresh token' });

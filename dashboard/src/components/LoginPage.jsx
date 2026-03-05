@@ -104,9 +104,9 @@ function LoginPage() {
                 />
                 <span className="text-sm text-gray-600">Ricordami</span>
               </label>
-              <a href="#" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
+              <Link to="/forgot-password" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
                 Password dimenticata?
-              </a>
+              </Link>
             </div>
 
             {/* Submit */}

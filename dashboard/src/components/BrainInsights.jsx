@@ -4,8 +4,9 @@ import {
   Brain, AlertTriangle, TrendingUp, TrendingDown, Users,
   Activity, Zap, MessageSquare, RefreshCw, ChevronDown,
   ChevronUp, Clock, Target, Heart, Frown, Smile, Star,
-  ArrowUp, ArrowDown, Minus
+  ArrowUp, ArrowDown, Minus, Settings
 } from 'lucide-react'
+import BrainSettings from './BrainSettings'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
 
@@ -109,11 +110,10 @@ export default function BrainInsights() {
           <button
             onClick={runBrainCycle}
             disabled={runningBrain}
-            className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 ${
-              runningBrain
+            className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 ${runningBrain
                 ? 'bg-purple-100 text-purple-400 cursor-not-allowed'
                 : 'bg-purple-600 text-white hover:bg-purple-700'
-            }`}
+              }`}
           >
             <Zap className={`w-4 h-4 ${runningBrain ? 'animate-pulse' : ''}`} />
             {runningBrain ? 'Analizzando...' : 'Analizza Ora'}
@@ -127,16 +127,16 @@ export default function BrainInsights() {
           {[
             { id: 'overview', label: 'Panoramica', icon: Activity },
             { id: 'clients', label: 'Clienti', icon: Users },
-            { id: 'actions', label: 'Azioni AI', icon: Zap }
+            { id: 'actions', label: 'Azioni AI', icon: Zap },
+            { id: 'settings', label: 'Impostazioni', icon: Settings }
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === tab.id
+              className={`flex items-center gap-2 pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === tab.id
                   ? 'border-purple-500 text-purple-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
+                }`}
             >
               <tab.icon className="w-4 h-4" />
               {tab.label}
@@ -147,13 +147,22 @@ export default function BrainInsights() {
 
       {/* Content */}
       {activeTab === 'overview' && (
-        <OverviewTab scoring={scoring} atRisk={atRisk} signals={signals} recentActions={recentActions} />
+        <OverviewTab
+          scoring={scoring}
+          atRisk={atRisk}
+          signals={signals}
+          recentActions={recentActions}
+          recoveryStats={overview?.recoveryStats || {}}
+        />
       )}
       {activeTab === 'clients' && (
         <ClientsTab allScores={allScores} expandedClient={expandedClient} setExpandedClient={setExpandedClient} />
       )}
       {activeTab === 'actions' && (
         <ActionsTab recentActions={recentActions} />
+      )}
+      {activeTab === 'settings' && (
+        <BrainSettings embedded />
       )}
     </div>
   )
@@ -162,9 +171,35 @@ export default function BrainInsights() {
 // ==========================================
 // TAB: Panoramica
 // ==========================================
-function OverviewTab({ scoring, atRisk, signals, recentActions }) {
+function OverviewTab({ scoring, atRisk, signals, recentActions, recoveryStats }) {
+  const recoveredCount = parseInt(recoveryStats.recovered_clients) || 0;
+  const valueSaved = parseFloat(recoveryStats.total_value_saved) || 0;
+
   return (
     <div className="space-y-6">
+      {/* 🚀 ROI WIDGET PUNTATO SULLE PALESTRE 🚀 */}
+      <div className="bg-gradient-to-r from-emerald-500 to-teal-500 rounded-xl p-6 text-white shadow-lg overflow-hidden relative">
+        <div className="absolute -right-10 -top-10 opacity-10">
+          <Brain className="w-48 h-48" />
+        </div>
+        <div className="relative z-10">
+          <h3 className="text-emerald-100 font-medium flex items-center gap-2 mb-4">
+            <Target className="w-5 h-5" />
+            Impatto Economico AI (Ultimi 30 giorni)
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div>
+              <p className="text-4xl font-bold mb-1">{recoveredCount}</p>
+              <p className="text-emerald-100 text-sm">Abbonamenti a rischio salvati</p>
+            </div>
+            <div>
+              <p className="text-4xl font-bold mb-1">€{Math.round(valueSaved)}</p>
+              <p className="text-emerald-100 text-sm">Fatturato stimato recuperato</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
@@ -402,7 +437,7 @@ function ClientsTab({ allScores, expandedClient, setExpandedClient }) {
                         </div>
                         <div>
                           <p className="text-gray-500 text-xs">Giorni preferiti</p>
-                          <p className="font-medium">{(client.preferred_days || []).map(d => d.substring(0,3)).join(', ') || 'N/A'}</p>
+                          <p className="font-medium">{(client.preferred_days || []).map(d => d.substring(0, 3)).join(', ') || 'N/A'}</p>
                         </div>
                         <div>
                           <p className="text-gray-500 text-xs">Orario preferito</p>

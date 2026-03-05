@@ -4,11 +4,16 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 
 // Connection pool
+if (!process.env.DATABASE_URL) {
+  console.error('FATAL: DATABASE_URL environment variable is required');
+  process.exit(1);
+}
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:coachaipass@postgres:5432/coachai',
-  max: 20,
+  connectionString: process.env.DATABASE_URL,
+  max: 50,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 30000,
 });
 
 // ========== INIZIALIZZAZIONE ==========
@@ -290,13 +295,21 @@ async function getClient(tenantId, phone) {
 
 async function getAllClients(tenantId) {
   const result = await pool.query(`
-    SELECT c.*, 
-           cs.churn_risk, 
+    SELECT c.*,
+           cs.churn_risk,
            cs.days_since_last_checkin,
-           cs.checkin_trend
+           cs.checkin_trend,
+           (SELECT COUNT(*) FROM messages m WHERE m.tenant_id = c.tenant_id AND m.phone = c.phone) as messages_count,
+           wp.id as latest_workout_id,
+           wp.created_at as latest_workout_date
     FROM clients c
     LEFT JOIN client_scoring cs ON cs.tenant_id = c.tenant_id AND cs.phone = c.phone
-    WHERE c.tenant_id = $1 
+    LEFT JOIN LATERAL (
+      SELECT id, created_at FROM workout_plans
+      WHERE tenant_id = c.tenant_id AND phone = c.phone
+      ORDER BY created_at DESC LIMIT 1
+    ) wp ON true
+    WHERE c.tenant_id = $1
     ORDER BY c.last_activity DESC
   `, [tenantId]);
   return result.rows;
@@ -592,11 +605,33 @@ async function getCheckinStreak(tenantId, phone) {
   return parseInt(result.rows[0]?.streak) || 0;
 }
 
+async function getCheckinRanking(tenantId, phone) {
+  const result = await pool.query(`
+    WITH monthly_counts AS (
+      SELECT phone, COUNT(*) as checkins
+      FROM checkins
+      WHERE tenant_id = $1 AND checked_in_at > NOW() - INTERVAL '30 days'
+      GROUP BY phone
+    ),
+    ranked AS (
+      SELECT phone, checkins,
+             RANK() OVER (ORDER BY checkins DESC) as position,
+             COUNT(*) OVER () as total_clients
+      FROM monthly_counts
+    )
+    SELECT position, total_clients, checkins
+    FROM ranked WHERE phone = $2
+  `, [tenantId, phone]);
+  return result.rows[0] || null;
+}
+
 async function getAllCheckinsToday(tenantId) {
   const result = await pool.query(`
-    SELECT c.*, cl.name
+    SELECT c.*,
+           cl.name,
+           CASE WHEN cl.phone IS NOT NULL THEN true ELSE false END as is_client
     FROM checkins c
-    JOIN clients cl ON c.tenant_id = cl.tenant_id AND c.phone = cl.phone
+    LEFT JOIN clients cl ON c.tenant_id = cl.tenant_id AND c.phone = cl.phone
     WHERE c.tenant_id = $1 AND DATE(c.checked_in_at) = CURRENT_DATE
     ORDER BY c.checked_in_at DESC
   `, [tenantId]);
@@ -1527,6 +1562,60 @@ async function syncClientProfiles(tenantId) {
   return result.rows;
 }
 
+// ========== BRAIN RECOVERIES ==========
+
+async function getPendingRecoveryAction(tenantId, phone, maxDays = 7) {
+  const result = await pool.query(`
+    SELECT * FROM brain_actions
+    WHERE tenant_id = $1 AND phone = $2 
+    AND action_type IN ('comeback_message', 'streak_recovery', 'scheda_adjust', 'personalized_motivation')
+    AND status = 'sent'
+    AND created_at > NOW() - INTERVAL '1 day' * $3
+    ORDER BY created_at DESC LIMIT 1
+  `, [tenantId, phone, maxDays]);
+  return result.rows[0] || null;
+}
+
+async function logRecovery(tenantId, phone, actionId, valueSaved = 0) {
+  try {
+    const result = await pool.query(`
+      INSERT INTO brain_recoveries (tenant_id, phone, action_id, value_saved)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (tenant_id, action_id) DO NOTHING
+      RETURNING *
+    `, [tenantId, phone, actionId, valueSaved]);
+    return result.rows[0];
+  } catch (error) {
+    console.error('[DB] Errore log recovery:', error.message);
+    return null;
+  }
+}
+
+async function getRecoveryStats(tenantId, days = 30) {
+  const result = await pool.query(`
+    SELECT 
+      COUNT(*) as recovered_clients,
+      COALESCE(SUM(value_saved), 0) as total_value_saved
+    FROM brain_recoveries
+    WHERE tenant_id = $1 AND recovered_at > NOW() - INTERVAL '1 day' * $2
+  `, [tenantId, days]);
+
+  const topActions = await pool.query(`
+    SELECT ba.action_type, COUNT(br.id) as successes
+    FROM brain_recoveries br
+    JOIN brain_actions ba ON br.action_id = ba.id
+    WHERE br.tenant_id = $1 AND br.recovered_at > NOW() - INTERVAL '1 day' * $2
+    GROUP BY ba.action_type
+    ORDER BY successes DESC
+    LIMIT 5
+  `, [tenantId, days]);
+
+  return {
+    ...result.rows[0],
+    topActions: topActions.rows
+  };
+}
+
 // ========== EXPORTS ==========
 
 module.exports = {
@@ -1598,6 +1687,7 @@ module.exports = {
   getTodayCheckin,
   getCheckinStats,
   getCheckinStreak,
+  getCheckinRanking,
   getAllCheckinsToday,
 
   // Referrals
@@ -1671,5 +1761,10 @@ module.exports = {
   updateClientProfileSummary,
   incrementClientProfileStats,
   getAllMessagesForSummary,
-  syncClientProfiles
+  syncClientProfiles,
+
+  // Brain Recoveries
+  getPendingRecoveryAction,
+  logRecovery,
+  getRecoveryStats
 };

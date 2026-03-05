@@ -1,26 +1,30 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Search, Phone, ArrowLeft, User, RefreshCw } from 'lucide-react'
+import { Search, Phone, ArrowLeft, User, RefreshCw, AlertCircle, MessageSquare } from 'lucide-react'
 
-const API_URL = ''
+import { useAuth } from '../context/AuthContext'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function Conversations() {
+  const { authFetch } = useAuth()
   const [conversations, setConversations] = useState([])
   const [selectedConversation, setSelectedConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
     fetchConversations()
-    const interval = setInterval(fetchConversations, 5000)
+    const interval = setInterval(fetchConversations, 30000)
     return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
     if (selectedConversation) {
       fetchMessages(selectedConversation.phone)
-      const interval = setInterval(() => fetchMessages(selectedConversation.phone), 3000)
+      const interval = setInterval(() => fetchMessages(selectedConversation.phone), 30000)
       return () => clearInterval(interval)
     }
   }, [selectedConversation])
@@ -35,13 +39,16 @@ function Conversations() {
 
   const fetchConversations = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/conversations`)
+      const res = await authFetch(`${API_URL}/api/conversations`)
       if (res.ok) {
         const data = await res.json()
         setConversations(data)
+        setError(null)
+      } else {
+        setError('Errore caricamento conversazioni')
       }
     } catch (err) {
-      console.log('Errore fetch conversazioni:', err)
+      setError('Errore di connessione')
     } finally {
       setLoading(false)
     }
@@ -49,13 +56,13 @@ function Conversations() {
 
   const fetchMessages = async (phone) => {
     try {
-      const res = await fetch(`${API_URL}/api/conversations/${phone}`)
+      const res = await authFetch(`${API_URL}/api/conversations/${phone}`)
       if (res.ok) {
         const data = await res.json()
         setMessages(data)
       }
     } catch (err) {
-      console.log('Errore fetch messaggi:', err)
+      console.error('Errore fetch messaggi:', err)
     }
   }
 
@@ -92,9 +99,15 @@ function Conversations() {
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          {error && (
+            <div className="m-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-sm text-red-700">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {error}
+            </div>
+          )}
           {loading ? (
             <div className="p-4 text-center text-gray-500">Caricamento...</div>
-          ) : filteredConversations.length === 0 ? (
+          ) : filteredConversations.length === 0 && !error ? (
             <div className="p-8 text-center text-gray-500">
               <User className="w-12 h-12 mx-auto mb-3 text-gray-300" />
               <p className="font-medium">Nessuna conversazione</p>
@@ -105,9 +118,8 @@ function Conversations() {
               <button
                 key={conv.phone}
                 onClick={() => setSelectedConversation(conv)}
-                className={`w-full p-4 flex items-center gap-3 hover:bg-gray-50 transition-colors border-b border-gray-100 ${
-                  selectedConversation?.phone === conv.phone ? 'bg-primary-50' : ''
-                }`}
+                className={`w-full p-4 flex items-center gap-3 hover:bg-gray-50 transition-colors border-b border-gray-100 ${selectedConversation?.phone === conv.phone ? 'bg-primary-50' : ''
+                  }`}
               >
                 <div className="relative">
                   <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
@@ -164,8 +176,10 @@ function Conversations() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
             {messages.length === 0 ? (
-              <div className="text-center text-gray-500 py-8">
-                Nessun messaggio
+              <div className="h-full flex flex-col items-center justify-center text-gray-500 p-8 text-center">
+                <MessageSquare className="w-12 h-12 text-gray-300 mb-3" />
+                <p className="font-medium text-gray-900">Nessun messaggio</p>
+                <p className="text-sm mt-1">Scrivi un messaggio per iniziare la conversazione</p>
               </div>
             ) : (
               messages.map((msg, i) => (
@@ -174,16 +188,14 @@ function Conversations() {
                   className={`flex ${msg.role === 'assistant' ? 'justify-start' : 'justify-end'}`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-2 ${
-                      msg.role === 'assistant'
-                        ? 'bg-white border border-gray-200 text-gray-900'
-                        : 'bg-primary-500 text-white'
-                    }`}
+                    className={`max-w-[80%] rounded-2xl px-4 py-2 ${msg.role === 'assistant'
+                      ? 'bg-white border border-gray-200 text-gray-900'
+                      : 'bg-primary-500 text-white'
+                      }`}
                   >
                     <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
-                    <p className={`text-xs mt-1 ${
-                      msg.role === 'assistant' ? 'text-gray-400' : 'text-primary-200'
-                    }`}>
+                    <p className={`text-xs mt-1 ${msg.role === 'assistant' ? 'text-gray-400' : 'text-primary-200'
+                      }`}>
                       {formatTime(msg.timestamp)}
                     </p>
                   </div>

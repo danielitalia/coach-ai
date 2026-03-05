@@ -1,3 +1,13 @@
+require('dotenv').config();
+
+// Valida env vars obbligatorie all'avvio
+const requiredEnvs = ['DATABASE_URL', 'JWT_SECRET', 'EVOLUTION_API_URL'];
+const missingEnvs = requiredEnvs.filter(env => !process.env[env]);
+if (missingEnvs.length > 0) {
+  console.error(`[FATAL] Missing required environment variables: ${missingEnvs.join(', ')}`);
+  process.exit(1);
+}
+
 const express = require('express');
 const axios = require('axios');
 const OpenAI = require('openai');
@@ -7,10 +17,10 @@ const fs = require('fs');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { enqueueWhatsAppMessage } = require('./services/whatsapp-queue');
-require('dotenv').config();
 
 // Database Multi-tenant
 const db = require('../db/database-multitenant');
+const logger = require('./utils/logger');
 
 // Auth routes
 const authRoutes = require('./routes/auth');
@@ -55,6 +65,10 @@ const apiLimiter = rateLimit({
   message: { error: 'Troppe richieste, riprova più tardi' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Se c'è un tenant in header o via middleware, usa quello, altrimenti usa IP
+    return req.header('X-Tenant-Id') || req.ip;
+  }
 });
 
 const superadminLimiter = rateLimit({
@@ -63,6 +77,10 @@ const superadminLimiter = rateLimit({
   message: { error: 'Troppe richieste superadmin' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Il superadmin si abilita via JWT su specifici utenti, limitiamo per l'ID utente se possibile, o IP
+    return (req.user && req.user.id) ? req.user.id : req.ip;
+  }
 });
 
 const webhookLimiter = rateLimit({
@@ -71,6 +89,11 @@ const webhookLimiter = rateLimit({
   message: { error: 'Rate limit exceeded' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Al webhook di whatsapp si può limitare per numero sorgente se rimosso il contesto
+    const tenantIdentifier = req.params.tenantIdentifier || req.params.slug;
+    return tenantIdentifier ? `webhook_${tenantIdentifier}` : req.ip;
+  }
 });
 
 const authLimiter = rateLimit({
@@ -79,6 +102,10 @@ const authLimiter = rateLimit({
   message: { error: 'Troppi tentativi di login, riprova più tardi' },
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Limita per email tentariva (se fornita), altrimenti IP
+    return (req.body && req.body.email) ? `auth_${req.body.email.toLowerCase()}` : req.ip;
+  }
 });
 
 // Applica rate limiting (ordine importante: specifici prima del generico)
@@ -89,8 +116,12 @@ app.use('/webhook', webhookLimiter);
 app.use('/api/auth/login', authLimiter);
 
 // CORS per dashboard
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'https://coachpalestra.it').split(',');
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin || ALLOWED_ORIGINS[0]);
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Tenant-Id');
   if (req.method === 'OPTIONS') {
@@ -112,7 +143,7 @@ if (AI_PROVIDER === 'anthropic' || process.env.ANTHROPIC_API_KEY) {
     apiKey: process.env.ANTHROPIC_API_KEY,
   });
   useAnthropic = true;
-  console.log(`AI Provider: Anthropic Claude (${AI_MODEL})`);
+  logger.info(`AI Provider: Anthropic Claude (${AI_MODEL})`);
 } else {
   // Usa OpenAI-compatible API (OpenAI, Groq, Ollama)
   const AI_BASE_URL = process.env.OPENAI_BASE_URL || 'http://host.docker.internal:11434/v1';
@@ -122,7 +153,7 @@ if (AI_PROVIDER === 'anthropic' || process.env.ANTHROPIC_API_KEY) {
     apiKey: AI_API_KEY,
     timeout: 60000,
   });
-  console.log(`AI Provider: ${AI_BASE_URL.includes('ollama') || AI_BASE_URL.includes('11434') ? 'Ollama (local)' : 'OpenAI API'}`);
+  logger.info(`AI Provider: ${AI_BASE_URL.includes('ollama') || AI_BASE_URL.includes('11434') ? 'Ollama (local)' : 'OpenAI API'}`);
 }
 
 // Alias per compatibilità
@@ -137,6 +168,85 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tenant', tenantRoutes);
 
 // ========== SCHEDA WEB (Link pubblico) ==========
+
+// Lookup descrizioni esercizi — arricchisce le schede generate dall'AI che non hanno descrizioni
+let exerciseDescriptionLookup = null;
+
+function getExerciseDescriptionLookup() {
+  if (exerciseDescriptionLookup) return exerciseDescriptionLookup;
+  exerciseDescriptionLookup = {};
+  // Popola dal database esercizi esistente
+  for (const [muscle, exercises] of Object.entries(exerciseDatabase)) {
+    for (const ex of exercises) {
+      exerciseDescriptionLookup[ex.name.toLowerCase()] = {
+        muscles: ex.muscles,
+        description: ex.description
+      };
+    }
+  }
+  // Aggiungi alias e nomi comuni
+  for (const [name, info] of Object.entries(extraDescriptions)) {
+    exerciseDescriptionLookup[name] = info;
+  }
+  return exerciseDescriptionLookup;
+}
+
+const extraDescriptions = {
+  'flessioni': { muscles: 'Petto, tricipiti, core', description: 'Mani a terra poco più larghe delle spalle, corpo dritto dalla testa ai piedi. Abbassati piegando i gomiti fino a sfiorare il pavimento col petto, poi spingi verso l\'alto. Tieni gli addominali contratti.' },
+  'push up': { muscles: 'Petto, tricipiti, core', description: 'Mani a terra poco più larghe delle spalle, corpo dritto dalla testa ai piedi. Abbassati piegando i gomiti fino a sfiorare il pavimento col petto, poi spingi verso l\'alto. Tieni gli addominali contratti.' },
+  'piegamenti': { muscles: 'Petto, tricipiti, core', description: 'Mani a terra poco più larghe delle spalle, corpo dritto dalla testa ai piedi. Abbassati piegando i gomiti fino a sfiorare il pavimento col petto, poi spingi verso l\'alto. Tieni gli addominali contratti.' },
+  'trazioni': { muscles: 'Dorsali, bicipiti', description: 'Afferra la barra con presa larga, palmi in avanti. Partendo con le braccia distese, tiranti su fino a portare il mento sopra la barra contraendo i dorsali. Scendi lentamente controllando il movimento.' },
+  'trazioni alla sbarra': { muscles: 'Dorsali, bicipiti', description: 'Afferra la barra con presa larga, palmi in avanti. Tiranti su fino a portare il mento sopra la barra, poi scendi lentamente. Se troppo difficili, usa una banda elastica come aiuto.' },
+  'dips': { muscles: 'Tricipiti, petto, spalle', description: 'Alle parallele (o tra due supporti stabili), sostieniti con le braccia distese. Piega i gomiti e scendi lentamente fino a circa 90°, poi spingi verso l\'alto tornando in posizione. Inclina il busto in avanti per coinvolgere più il petto.' },
+  'dip': { muscles: 'Tricipiti, petto, spalle', description: 'Alle parallele (o tra due supporti stabili), sostieniti con le braccia distese. Piega i gomiti e scendi lentamente fino a circa 90°, poi spingi verso l\'alto tornando in posizione.' },
+  'estensioni': { muscles: 'Tricipiti', description: 'Con un manubrio o peso sopra la testa a braccia distese, piega solo i gomiti per abbassare il peso dietro la testa, poi distendi le braccia tornando alla posizione iniziale. Tieni i gomiti fermi vicino alla testa.' },
+  'estensioni tricipiti': { muscles: 'Tricipiti', description: 'Con un manubrio o peso sopra la testa a braccia distese, piega solo i gomiti per abbassare il peso dietro la testa, poi distendi le braccia tornando alla posizione iniziale.' },
+  'curl': { muscles: 'Bicipiti', description: 'In piedi con manubri o bilanciere, palmi verso l\'alto. Con i gomiti fermi lungo il busto, piega le braccia portando il peso verso le spalle. Abbassa lentamente senza oscillare il corpo.' },
+  'curl manubri': { muscles: 'Bicipiti', description: 'In piedi con un manubrio per mano, piega un braccio alla volta portando il manubrio verso la spalla. I gomiti restano fermi lungo i fianchi. Abbassa lentamente.' },
+  'curl con manubri': { muscles: 'Bicipiti', description: 'In piedi con un manubrio per mano, piega un braccio alla volta portando il manubrio verso la spalla. I gomiti restano fermi lungo i fianchi. Abbassa lentamente.' },
+  'remi': { muscles: 'Dorsali, romboidi, bicipiti', description: 'Piega il busto in avanti a 45° con le ginocchia leggermente flesse. Afferra i manubri o il bilanciere e tirali verso l\'ombelico stringendo le scapole, poi abbassa lentamente.' },
+  'rematore': { muscles: 'Dorsali, romboidi, bicipiti', description: 'Piega il busto in avanti a 45° con le ginocchia leggermente flesse. Tira il peso verso l\'ombelico stringendo le scapole insieme, poi rilascia lentamente.' },
+  'rematore con manubri': { muscles: 'Dorsali, romboidi, bicipiti', description: 'Appoggia un ginocchio e una mano su una panca. Con l\'altra mano afferra un manubrio e tiralo verso il fianco, stringendo la scapola. Abbassa lentamente. Fai tutte le reps da un lato, poi cambia.' },
+  'step-up': { muscles: 'Quadricipiti, glutei, equilibrio', description: 'Di fronte a un rialzo stabile (panca, gradino), sali con un piede e spingi verso l\'alto fino a stare in piedi sulla piattaforma. Scendi lentamente con lo stesso piede. Alterna le gambe.' },
+  'step up': { muscles: 'Quadricipiti, glutei, equilibrio', description: 'Di fronte a un rialzo stabile (panca, gradino), sali con un piede e spingi verso l\'alto fino a stare in piedi sulla piattaforma. Scendi lentamente con lo stesso piede. Alterna le gambe.' },
+  'alzate laterali': { muscles: 'Spalle (deltoide laterale)', description: 'In piedi con un manubrio per mano lungo i fianchi. Solleva le braccia lateralmente fino all\'altezza delle spalle, con i gomiti leggermente piegati. Mantieni un secondo in alto, poi abbassa lentamente.' },
+  'burpees': { muscles: 'Tutto il corpo, cardio', description: 'Da in piedi, abbassati in squat e metti le mani a terra. Salta portando i piedi indietro in posizione di plank. Fai un push-up (opzionale), riporta i piedi avanti e salta verso l\'alto con le braccia sopra la testa.' },
+  'burpee': { muscles: 'Tutto il corpo, cardio', description: 'Da in piedi, abbassati in squat e metti le mani a terra. Salta portando i piedi indietro in posizione di plank. Fai un push-up (opzionale), riporta i piedi avanti e salta verso l\'alto con le braccia sopra la testa.' },
+  'jumping jack': { muscles: 'Cardio, spalle, gambe', description: 'In piedi con braccia lungo i fianchi. Salta aprendo le gambe e portando le braccia sopra la testa. Salta di nuovo tornando alla posizione di partenza. Ripeti a ritmo costante.' },
+  'jumping jacks': { muscles: 'Cardio, spalle, gambe', description: 'In piedi con braccia lungo i fianchi. Salta aprendo le gambe e portando le braccia sopra la testa. Salta di nuovo tornando alla posizione di partenza. Ripeti a ritmo costante.' },
+  'lunges': { muscles: 'Quadricipiti, glutei, equilibrio', description: 'In piedi, fai un passo lungo in avanti. Piega entrambe le ginocchia a 90°: il ginocchio posteriore sfiora il pavimento. Spingi col piede davanti per tornare in posizione. Alterna le gambe.' },
+  'affondi laterali': { muscles: 'Quadricipiti, adduttori, glutei', description: 'In piedi, fai un passo largo di lato. Piega il ginocchio della gamba che hai spostato mantenendo l\'altra gamba distesa. Spingi per tornare alla posizione iniziale. Alterna i lati.' },
+  'hip thrust': { muscles: 'Glutei, femorali', description: 'Appoggia la parte alta della schiena su una panca. Con i piedi a terra alla larghezza delle spalle, spingi il bacino verso l\'alto stringendo i glutei. In alto il corpo forma una linea dritta dalle spalle alle ginocchia. Abbassa lentamente.' },
+  'stacco': { muscles: 'Dorsali, glutei, femorali, core', description: 'In piedi con il bilanciere o i manubri davanti alle gambe. Piega il busto in avanti mantenendo la schiena dritta, mandando il sedere indietro. Afferra il peso e sollevati spingendo sui talloni e contraendo i glutei.' },
+  'stacco rumeno': { muscles: 'Femorali, glutei, lombari', description: 'In piedi con il peso in mano, piega leggermente le ginocchia. Inclina il busto in avanti facendo scivolare il peso lungo le gambe. Senti l\'allungamento dei femorali, poi risali contraendo glutei e femorali.' },
+  'plank laterale': { muscles: 'Obliqui, core', description: 'Sdraiati su un fianco, appoggiandoti sull\'avambraccio. Solleva il bacino creando una linea dritta dalla testa ai piedi. Mantieni la posizione contraendo gli addominali. Ripeti dall\'altro lato.' },
+  'superman': { muscles: 'Lombari, glutei, dorsali', description: 'Sdraiato a pancia in giù con braccia e gambe distese. Solleva contemporaneamente braccia e gambe dal pavimento, contraendo la schiena e i glutei. Mantieni 2-3 secondi, poi abbassa lentamente.' },
+  'ponte glutei': { muscles: 'Glutei, femorali', description: 'Sdraiato sulla schiena con le ginocchia piegate e i piedi a terra. Spingi il bacino verso l\'alto contraendo i glutei fino a creare una linea dritta dalle ginocchia alle spalle. Mantieni un secondo, poi scendi lentamente.' },
+  'glute bridge': { muscles: 'Glutei, femorali', description: 'Sdraiato sulla schiena con le ginocchia piegate e i piedi a terra. Spingi il bacino verso l\'alto contraendo i glutei fino a creare una linea dritta dalle ginocchia alle spalle. Mantieni un secondo, poi scendi lentamente.' },
+  'corsa sul posto': { muscles: 'Cardio, gambe', description: 'Corri sul posto alzando le ginocchia il più possibile. Mantieni un ritmo costante e usa le braccia in modo coordinato. Respira in modo regolare.' },
+  'skip': { muscles: 'Cardio, quadricipiti', description: 'Corri sul posto portando le ginocchia il più in alto possibile verso il petto. Muovi le braccia in modo coordinato e mantieni il busto eretto. Ideale come riscaldamento o cardio intenso.' },
+  'box jump': { muscles: 'Gambe, glutei, esplosività', description: 'Di fronte a un rialzo stabile, piega le ginocchia e salta atterrando con entrambi i piedi sulla piattaforma. Raddrizzati in piedi, poi scendi con controllo. Scegli un\'altezza adeguata al tuo livello.' },
+  'wall sit': { muscles: 'Quadricipiti, glutei', description: 'Appoggia la schiena al muro e scendi con le gambe fino a formare un angolo di 90° alle ginocchia. Come se fossi seduto su una sedia invisibile. Mantieni la posizione per il tempo indicato.' },
+  'sedia al muro': { muscles: 'Quadricipiti, glutei', description: 'Appoggia la schiena al muro e scendi con le gambe fino a formare un angolo di 90° alle ginocchia. Come se fossi seduto su una sedia invisibile. Mantieni la posizione per il tempo indicato.' },
+};
+
+// Funzione per cercare la descrizione di un esercizio (fuzzy match)
+function findExerciseDescription(exerciseName) {
+  if (!exerciseName) return null;
+  const lookup = getExerciseDescriptionLookup();
+  const nameLower = exerciseName.toLowerCase().replace(/^[-•*\s]+/, '').trim();
+
+  // Match esatto
+  if (lookup[nameLower]) return lookup[nameLower];
+
+  // Match parziale — cerca se il nome dell'esercizio contiene o è contenuto in una chiave
+  for (const [key, info] of Object.entries(lookup)) {
+    if (nameLower.includes(key) || key.includes(nameLower)) return info;
+  }
+
+  return null;
+}
+
 app.get('/scheda/:workoutId', async (req, res) => {
   try {
     const { workoutId } = req.params;
@@ -186,14 +296,23 @@ app.get('/scheda/:workoutId', async (req, res) => {
         `;
 
         if (day.exercises && day.exercises.length > 0) {
-          day.exercises.forEach(ex => {
+          day.exercises.forEach((ex, exIdx) => {
+            const exName = ex.name || ex;
+            // Arricchisci con descrizione dal lookup se non presente
+            const lookup = (!ex.description || !ex.muscles) ? findExerciseDescription(exName) : null;
+            const exMuscles = ex.muscles || (lookup ? lookup.muscles : '');
+            const exDesc = ex.description || (lookup ? lookup.description : '');
             workoutDaysHtml += `
               <div class="exercise">
-                <span class="exercise-name">${ex.name || ex}</span>
-                <div class="exercise-details">
-                  ${ex.sets ? `<span class="exercise-badge">${ex.sets}x${ex.reps || '?'}</span>` : ''}
-                  ${ex.rest ? `<span class="exercise-badge">${ex.rest}</span>` : ''}
+                <div class="exercise-top">
+                  <span class="exercise-name">${exName}</span>
+                  <div class="exercise-details">
+                    ${ex.sets ? `<span class="exercise-badge">${ex.sets}x${ex.reps || '?'}</span>` : ''}
+                    ${ex.rest && ex.rest !== '-' ? `<span class="exercise-badge">⏱ ${ex.rest}</span>` : ''}
+                  </div>
                 </div>
+                ${exMuscles ? `<div class="exercise-muscles">💪 ${exMuscles}</div>` : ''}
+                ${exDesc ? `<div class="exercise-description">${exDesc}</div>` : ''}
               </div>
             `;
           });
@@ -662,7 +781,30 @@ function extractWorkoutFromAIResponse(aiResponse) {
 
 // ========== WEBHOOK MULTI-TENANT ==========
 
-app.post('/webhook', identifyTenantFromWhatsApp, async (req, res) => {
+// Middleware firma webhook WhatsApp (sicurezza)
+function validateWebhookSignature(req, res, next) {
+  // Evolution API v2 invia l'apikey o tramite un header custom configurabile.
+  // Di default cerca un header 'apikey' o 'x-webhook-secret'.
+  const webhookSecret = process.env.WEBHOOK_SECRET;
+
+  if (webhookSecret) {
+    const signature = req.headers['apikey'] || req.headers['x-webhook-secret'] || req.headers['authorization'];
+
+    // Per authorization header (Bearer token)
+    let token = signature;
+    if (signature && signature.startsWith('Bearer ')) {
+      token = signature.split(' ')[1];
+    }
+
+    if (token !== webhookSecret) {
+      console.warn('⚠️ Accesso webhook negato: firma non valida');
+      return res.status(401).json({ error: 'Unauthorized webhook signature' });
+    }
+  }
+  next();
+}
+
+app.post('/webhook', validateWebhookSignature, identifyTenantFromWhatsApp, async (req, res) => {
   try {
     const body = req.body;
     console.log('Webhook ricevuto:', JSON.stringify(body, null, 2));
@@ -932,6 +1074,21 @@ async function processCheckin(tenantId, tenant, phoneNumber) {
 
     await db.addCheckin(tenantId, phoneNumber, workoutDay);
 
+    // --- BRAIN RECOVERY TRACKING ---
+    try {
+      const pendingAction = await db.getPendingRecoveryAction(tenantId, phoneNumber, 7);
+      if (pendingAction) {
+        // Usa un valore stimato fisso (es. 50 euro al mese).
+        const estimatedValue = 50.00;
+        const recovery = await db.logRecovery(tenantId, phoneNumber, pendingAction.id, estimatedValue);
+        if (recovery) {
+          logger.info(`🚨 CLIENTE RECUPERATO: ${clientName} (${phoneNumber}) per tenant ${tenant.name} tramite azione ${pendingAction.action_type}`);
+        }
+      }
+    } catch (recErr) {
+      logger.error('Errore durante tracciamento recovery:', recErr);
+    }
+
     // Aggiorna contatore check-in nel profilo memoria e ricalcola scoring Brain AI
     await db.incrementClientProfileStats(tenantId, phoneNumber, 'total_checkins');
     try {
@@ -959,6 +1116,7 @@ async function processCheckin(tenantId, tenant, phoneNumber) {
 
     const stats = await db.getCheckinStats(tenantId, phoneNumber);
     const streak = await db.getCheckinStreak(tenantId, phoneNumber);
+    const ranking = await db.getCheckinRanking(tenantId, phoneNumber);
     const thisMonth = parseInt(stats?.this_month) || 1;
     const totalCheckins = parseInt(stats?.total_checkins) || 1;
 
@@ -967,17 +1125,49 @@ async function processCheckin(tenantId, tenant, phoneNumber) {
     if (totalCheckins > 0 && totalCheckins % 10 === 0) {
       const rewardDesc = `Premio Fedeltà - Hai raggiunto ${totalCheckins} allenamenti! 🏆`;
       await db.createReward(tenantId, phoneNumber, 'loyalty_bonus', rewardDesc);
-      loyaltyBonus = `\n\n⭐ *TRAGUARDO RAGGIUNTO!*\nComplimenti! Questo è il tuo ${totalCheckins}° allenamento.\nHai sbloccato un premio fedeltà! 🎉\nScrivi "premi" per vederlo.`;
+      loyaltyBonus = `\n\n🏆 *TRAGUARDO RAGGIUNTO!*\nQuesto è il tuo ${totalCheckins}° allenamento!\nHai sbloccato un premio fedeltà! 🎁\nScrivi "premi" per vederlo.`;
     }
 
     let message = `*Check-in registrato!* ✅\n\n`;
     message += `Ciao ${clientName}! 💪\n`;
 
-    if (streak > 1) {
-      message += `🔥 Streak: ${streak} giorni consecutivi!\n`;
+    // Streak con messaggi motivazionali crescenti
+    if (streak >= 20) {
+      message += `\n🔥🔥🔥 *LEGGENDA!* ${streak} giorni consecutivi!\nSei inarrestabile! Pochissimi arrivano qui.\n`;
+    } else if (streak >= 10) {
+      message += `\n🔥🔥 *INCREDIBILE!* ${streak} giorni di streak!\nSei tra i più costanti della palestra!\n`;
+    } else if (streak >= 5) {
+      message += `\n🔥 *Grande streak!* ${streak} giorni consecutivi!\nNon mollare, stai costruendo un'abitudine!\n`;
+    } else if (streak >= 3) {
+      message += `\n🔥 Streak: ${streak} giorni consecutivi! Continua così!\n`;
+    } else if (streak > 1) {
+      message += `\n🔥 ${streak} giorni di fila! Stai partendo forte!\n`;
     }
-    message += `📊 Allenamenti totali: ${totalCheckins}\n`;
-    message += `📅 Questo mese: ${thisMonth}\n`;
+
+    // Barra progresso mensile (obiettivo 20 allenamenti/mese)
+    const monthGoal = 20;
+    const progress = Math.min(thisMonth, monthGoal);
+    const progressBar = '█'.repeat(Math.round(progress / monthGoal * 10)) + '░'.repeat(10 - Math.round(progress / monthGoal * 10));
+    message += `\n📅 Questo mese: ${thisMonth}/${monthGoal}\n${progressBar} ${Math.round(progress / monthGoal * 100)}%\n`;
+
+    // Classifica
+    if (ranking) {
+      const topPercent = Math.round((ranking.position / ranking.total_clients) * 100);
+      if (topPercent <= 10) {
+        message += `\n🥇 Sei nella *TOP 10%* della palestra! (${ranking.position}°/${ranking.total_clients})\n`;
+      } else if (topPercent <= 25) {
+        message += `\n🥈 Sei nella *TOP 25%*! (${ranking.position}°/${ranking.total_clients})\n`;
+      } else if (topPercent <= 50) {
+        message += `\n📊 Posizione: ${ranking.position}°/${ranking.total_clients} — ancora pochi allenamenti per salire!\n`;
+      }
+    }
+
+    // Prossimo traguardo
+    const nextMilestone = Math.ceil(totalCheckins / 10) * 10;
+    const remaining = nextMilestone - totalCheckins;
+    if (remaining <= 3 && remaining > 0) {
+      message += `\n⭐ Mancano solo *${remaining}* allenament${remaining === 1 ? 'o' : 'i'} al prossimo premio!\n`;
+    }
 
     if (workoutMessage) {
       message += workoutMessage;
@@ -1218,53 +1408,53 @@ function parseWorkoutFromText(text) {
 
 const exerciseDatabase = {
   chest: [
-    { name: 'Panca Piana', sets: '4', reps: '8-10', rest: '90s' },
-    { name: 'Panca Inclinata Manubri', sets: '3', reps: '10-12', rest: '60s' },
-    { name: 'Croci ai Cavi', sets: '3', reps: '12-15', rest: '60s' },
-    { name: 'Push-up', sets: '3', reps: '15-20', rest: '45s' },
-    { name: 'Chest Press', sets: '3', reps: '10-12', rest: '60s' },
+    { name: 'Panca Piana', sets: '4', reps: '8-10', rest: '90s', muscles: 'Petto, tricipiti, spalle anteriori', description: 'Sdraiati sulla panca con i piedi a terra. Impugna il bilanciere con presa leggermente più larga delle spalle. Abbassa lentamente il bilanciere al petto, poi spingi verso l\'alto fino a distendere le braccia.' },
+    { name: 'Panca Inclinata Manubri', sets: '3', reps: '10-12', rest: '60s', muscles: 'Petto alto, spalle anteriori', description: 'Siediti sulla panca inclinata a 30-45°. Con un manubrio per mano, parti con le braccia distese in alto e abbassa lentamente i manubri ai lati del petto, poi spingi verso l\'alto.' },
+    { name: 'Croci ai Cavi', sets: '3', reps: '12-15', rest: '60s', muscles: 'Petto, spalle anteriori', description: 'In piedi tra due cavi alti, afferra le maniglie e fai un passo avanti. Con le braccia leggermente flesse, porta le mani una verso l\'altra davanti al petto con un movimento ad arco.' },
+    { name: 'Push-up', sets: '3', reps: '15-20', rest: '45s', muscles: 'Petto, tricipiti, core', description: 'Mani a terra poco più larghe delle spalle, corpo dritto dalla testa ai piedi. Abbassati piegando i gomiti fino a sfiorare il pavimento col petto, poi spingi verso l\'alto. Tieni gli addominali contratti.' },
+    { name: 'Chest Press', sets: '3', reps: '10-12', rest: '60s', muscles: 'Petto, tricipiti', description: 'Siediti alla macchina con la schiena ben appoggiata. Impugna le maniglie all\'altezza del petto e spingi in avanti fino a distendere le braccia, poi torna lentamente alla posizione iniziale.' },
   ],
   back: [
-    { name: 'Lat Machine', sets: '4', reps: '10-12', rest: '60s' },
-    { name: 'Rematore con Bilanciere', sets: '4', reps: '8-10', rest: '90s' },
-    { name: 'Pulley Basso', sets: '3', reps: '12-15', rest: '60s' },
-    { name: 'Hyperextension', sets: '3', reps: '15', rest: '45s' },
-    { name: 'Trazioni Assistite', sets: '3', reps: '8-10', rest: '90s' },
+    { name: 'Lat Machine', sets: '4', reps: '10-12', rest: '60s', muscles: 'Dorsali, bicipiti', description: 'Siediti alla macchina, afferra la barra larga con presa prona. Tira la barra verso il petto portando i gomiti indietro e verso il basso. Controlla il ritorno lento verso l\'alto.' },
+    { name: 'Rematore con Bilanciere', sets: '4', reps: '8-10', rest: '90s', muscles: 'Dorsali, romboidi, bicipiti', description: 'In piedi, piega il busto in avanti a circa 45° con le ginocchia leggermente flesse. Afferra il bilanciere e tiralo verso l\'ombelico stringendo le scapole, poi abbassa lentamente.' },
+    { name: 'Pulley Basso', sets: '3', reps: '12-15', rest: '60s', muscles: 'Dorsali, romboidi', description: 'Siediti alla macchina con i piedi sui supporti e le ginocchia leggermente flesse. Afferra la maniglia e tira verso l\'addome stringendo le scapole, poi rilascia lentamente in avanti.' },
+    { name: 'Hyperextension', sets: '3', reps: '15', rest: '45s', muscles: 'Lombari, glutei, femorali', description: 'Posizionati sulla panca a 45° con le cosce appoggiate e i piedi bloccati. Parti con il busto in avanti, poi sollevati fino a formare una linea dritta senza inarcare troppo la schiena.' },
+    { name: 'Trazioni Assistite', sets: '3', reps: '8-10', rest: '90s', muscles: 'Dorsali, bicipiti', description: 'Alla macchina per trazioni assistite, inginocchiati sul supporto. Afferra la barra con presa larga e tiranti su fino a portare il mento sopra la barra, poi scendi lentamente.' },
   ],
   legs: [
-    { name: 'Squat', sets: '4', reps: '8-10', rest: '120s' },
-    { name: 'Leg Press', sets: '4', reps: '10-12', rest: '90s' },
-    { name: 'Affondi', sets: '3', reps: '12 per gamba', rest: '60s' },
-    { name: 'Leg Curl', sets: '3', reps: '12-15', rest: '60s' },
-    { name: 'Leg Extension', sets: '3', reps: '12-15', rest: '60s' },
-    { name: 'Calf Raise', sets: '4', reps: '15-20', rest: '45s' },
+    { name: 'Squat', sets: '4', reps: '8-10', rest: '120s', muscles: 'Quadricipiti, glutei, femorali', description: 'In piedi con i piedi alla larghezza delle spalle. Con il bilanciere sulle spalle (o a corpo libero), piega le ginocchia e scendi come se ti sedessi su una sedia. Le ginocchia seguono la direzione delle punte dei piedi. Risali spingendo sui talloni.' },
+    { name: 'Leg Press', sets: '4', reps: '10-12', rest: '90s', muscles: 'Quadricipiti, glutei', description: 'Siediti alla macchina con la schiena ben appoggiata. Posiziona i piedi sulla pedana alla larghezza delle spalle. Spingi la pedana distendendo le gambe senza bloccare le ginocchia, poi piega lentamente.' },
+    { name: 'Affondi', sets: '3', reps: '12 per gamba', rest: '60s', muscles: 'Quadricipiti, glutei, equilibrio', description: 'In piedi, fai un passo lungo in avanti. Piega entrambe le ginocchia a 90°: il ginocchio posteriore sfiora il pavimento, quello anteriore non supera la punta del piede. Spingi col piede davanti per tornare in posizione.' },
+    { name: 'Leg Curl', sets: '3', reps: '12-15', rest: '60s', muscles: 'Femorali (posteriore coscia)', description: 'Sdraiati a pancia in giù sulla macchina con le caviglie sotto il rullo imbottito. Piega le ginocchia portando i talloni verso i glutei, poi torna lentamente alla posizione distesa.' },
+    { name: 'Leg Extension', sets: '3', reps: '12-15', rest: '60s', muscles: 'Quadricipiti (davanti coscia)', description: 'Siediti alla macchina con le caviglie dietro il rullo imbottito e la schiena appoggiata. Distendi le gambe in avanti fino a estenderle completamente, poi ripiega lentamente.' },
+    { name: 'Calf Raise', sets: '4', reps: '15-20', rest: '45s', muscles: 'Polpacci', description: 'In piedi su un rialzo con le punte dei piedi sul bordo e i talloni nel vuoto. Sollevati sulle punte il più in alto possibile, mantieni un secondo, poi scendi lentamente allungando il polpaccio.' },
   ],
   shoulders: [
-    { name: 'Military Press', sets: '4', reps: '8-10', rest: '90s' },
-    { name: 'Alzate Laterali', sets: '3', reps: '12-15', rest: '45s' },
-    { name: 'Alzate Frontali', sets: '3', reps: '12-15', rest: '45s' },
-    { name: 'Face Pull', sets: '3', reps: '15', rest: '45s' },
-    { name: 'Scrollate', sets: '3', reps: '12-15', rest: '60s' },
+    { name: 'Military Press', sets: '4', reps: '8-10', rest: '90s', muscles: 'Spalle (deltoidi), tricipiti', description: 'Seduto o in piedi, porta il bilanciere o i manubri all\'altezza delle spalle con i palmi in avanti. Spingi verso l\'alto fino a distendere le braccia sopra la testa, poi abbassa lentamente.' },
+    { name: 'Alzate Laterali', sets: '3', reps: '12-15', rest: '45s', muscles: 'Spalle (deltoide laterale)', description: 'In piedi con un manubrio per mano lungo i fianchi. Solleva le braccia lateralmente fino all\'altezza delle spalle, con i gomiti leggermente piegati. Mantieni un secondo in alto, poi abbassa lentamente.' },
+    { name: 'Alzate Frontali', sets: '3', reps: '12-15', rest: '45s', muscles: 'Spalle (deltoide anteriore)', description: 'In piedi con i manubri davanti alle cosce. Solleva un braccio alla volta davanti a te fino all\'altezza delle spalle, con il gomito leggermente piegato. Abbassa lentamente e alterna.' },
+    { name: 'Face Pull', sets: '3', reps: '15', rest: '45s', muscles: 'Spalle posteriori, trapezio', description: 'Al cavo alto con corda, tira verso il viso separando le estremità della corda. I gomiti si alzano verso l\'esterno e le mani finiscono ai lati della testa. Stringi le scapole, poi torna lentamente.' },
+    { name: 'Scrollate', sets: '3', reps: '12-15', rest: '60s', muscles: 'Trapezio superiore', description: 'In piedi con manubri o bilanciere lungo i fianchi. Solleva le spalle verso le orecchie il più in alto possibile senza piegare i gomiti. Mantieni un secondo in alto, poi abbassa lentamente.' },
   ],
   arms: [
-    { name: 'Curl con Bilanciere', sets: '3', reps: '10-12', rest: '60s' },
-    { name: 'Curl Manubri Alternati', sets: '3', reps: '12', rest: '45s' },
-    { name: 'French Press', sets: '3', reps: '10-12', rest: '60s' },
-    { name: 'Pushdown ai Cavi', sets: '3', reps: '12-15', rest: '45s' },
-    { name: 'Hammer Curl', sets: '3', reps: '12', rest: '45s' },
+    { name: 'Curl con Bilanciere', sets: '3', reps: '10-12', rest: '60s', muscles: 'Bicipiti', description: 'In piedi, impugna il bilanciere con presa supina (palmi verso l\'alto). Con i gomiti fermi lungo il busto, piega le braccia portando il bilanciere verso le spalle. Abbassa lentamente senza oscillare il corpo.' },
+    { name: 'Curl Manubri Alternati', sets: '3', reps: '12', rest: '45s', muscles: 'Bicipiti', description: 'In piedi o seduto, un manubrio per mano lungo i fianchi. Piega un braccio alla volta portando il manubrio verso la spalla, ruotando il palmo verso l\'alto durante la salita. Alterna le braccia.' },
+    { name: 'French Press', sets: '3', reps: '10-12', rest: '60s', muscles: 'Tricipiti', description: 'Sdraiato su panca o seduto, tieni il bilanciere o i manubri sopra la testa a braccia distese. Piega solo i gomiti per abbassare il peso dietro la testa, poi distendi le braccia tornando su.' },
+    { name: 'Pushdown ai Cavi', sets: '3', reps: '12-15', rest: '45s', muscles: 'Tricipiti', description: 'Al cavo alto, afferra la barra o la corda con i gomiti vicini al busto. Spingi verso il basso distendendo completamente le braccia, poi piega lentamente i gomiti per tornare su. I gomiti restano fermi.' },
+    { name: 'Hammer Curl', sets: '3', reps: '12', rest: '45s', muscles: 'Bicipiti, avambracci', description: 'In piedi con i manubri lungo i fianchi, palmi rivolti uno verso l\'altro (presa neutra). Piega le braccia portando i manubri verso le spalle senza ruotare i polsi. Abbassa lentamente.' },
   ],
   core: [
-    { name: 'Crunch', sets: '3', reps: '20', rest: '30s' },
-    { name: 'Plank', sets: '3', reps: '45-60s', rest: '30s' },
-    { name: 'Russian Twist', sets: '3', reps: '20', rest: '30s' },
-    { name: 'Leg Raise', sets: '3', reps: '15', rest: '30s' },
-    { name: 'Mountain Climber', sets: '3', reps: '30s', rest: '30s' },
+    { name: 'Crunch', sets: '3', reps: '20', rest: '30s', muscles: 'Addominali alti', description: 'Sdraiato sulla schiena con le ginocchia piegate e i piedi a terra. Le mani dietro la testa o incrociate sul petto. Solleva le spalle da terra contraendo gli addominali, senza tirare il collo. Torna giù lentamente.' },
+    { name: 'Plank', sets: '3', reps: '45-60s', rest: '30s', muscles: 'Core completo (addominali, obliqui, lombari)', description: 'Appoggiati sugli avambracci e sulle punte dei piedi, corpo dritto come una tavola. Contrai addominali e glutei. Non abbassare i fianchi e non alzare il sedere. Respira normalmente e mantieni la posizione.' },
+    { name: 'Russian Twist', sets: '3', reps: '20', rest: '30s', muscles: 'Obliqui, addominali', description: 'Seduto a terra, inclina il busto leggermente indietro con le ginocchia piegate e i piedi sollevati. Ruota il busto a destra e a sinistra toccando il pavimento con le mani (o un peso) ad ogni lato. Una rotazione per lato = 1 ripetizione.' },
+    { name: 'Leg Raise', sets: '3', reps: '15', rest: '30s', muscles: 'Addominali bassi', description: 'Sdraiato sulla schiena con le gambe distese e le mani sotto i glutei. Solleva le gambe dritte fino a 90° mantenendo la zona lombare a terra, poi abbassa lentamente senza toccare il pavimento.' },
+    { name: 'Mountain Climber', sets: '3', reps: '30s', rest: '30s', muscles: 'Core, cardio, spalle', description: 'Posizione di push-up con le braccia distese. Porta velocemente un ginocchio alla volta verso il petto, alternando le gambe come se corresse sul posto. Mantieni il busto stabile e il core contratto.' },
   ],
   cardio: [
-    { name: 'Tapis Roulant', sets: '1', reps: '20-30 min', rest: '-' },
-    { name: 'Cyclette', sets: '1', reps: '20-30 min', rest: '-' },
-    { name: 'Ellittica', sets: '1', reps: '20-30 min', rest: '-' },
-    { name: 'Vogatore', sets: '1', reps: '15-20 min', rest: '-' },
+    { name: 'Tapis Roulant', sets: '1', reps: '20-30 min', rest: '-', muscles: 'Gambe, sistema cardiovascolare', description: 'Cammina a passo svelto o corri a ritmo costante. Inizia con 5 min di riscaldamento lento, poi aumenta il ritmo. Mantieni una velocità che ti permetta di parlare ma con un po\' di fatica. Rallenta negli ultimi 3 min.' },
+    { name: 'Cyclette', sets: '1', reps: '20-30 min', rest: '-', muscles: 'Gambe, sistema cardiovascolare', description: 'Regola il sellino all\'altezza giusta (gamba quasi distesa al punto più basso). Pedala a ritmo costante mantenendo una resistenza che ti faccia sudare. Varia l\'intensità ogni 5 minuti per maggior beneficio.' },
+    { name: 'Ellittica', sets: '1', reps: '20-30 min', rest: '-', muscles: 'Tutto il corpo, sistema cardiovascolare', description: 'Posizionati sull\'ellittica impugnando le maniglie mobili. Muovi gambe e braccia in modo fluido e coordinato. Mantieni il busto eretto e un ritmo che ti faccia sudare senza affaticarti troppo.' },
+    { name: 'Vogatore', sets: '1', reps: '15-20 min', rest: '-', muscles: 'Schiena, gambe, braccia, core', description: 'Siediti al vogatore con i piedi sulle pedane. Il movimento parte dalle gambe (spingi), poi inclina il busto indietro, infine tira le braccia al petto. Per tornare: distendi le braccia, piega il busto avanti, piega le ginocchia.' },
   ]
 };
 
@@ -1382,28 +1572,55 @@ const legacyTenant = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log(`[DEBUG Auth] Token mancante per IP: ${req.ip}, Route: ${req.originalUrl}`);
       return res.status(401).json({ error: 'Token mancante' });
     }
 
     const token = authHeader.split(' ')[1];
     const decoded = verifyToken(token);
     if (!decoded || !decoded.tenantId) {
-      console.log(`[DEBUG Auth] Token non valido per IP: ${req.ip}, Route: ${req.originalUrl} (Decoded: ${JSON.stringify(decoded)})`);
       return res.status(401).json({ error: 'Token non valido o scaduto' });
+    }
+
+    // Verifica che l'utente abbia effettivamente accesso a questo tenant
+    const role = await db.getUserTenantRole(decoded.userId, decoded.tenantId);
+    if (!role) {
+      console.warn(`[Auth] Accesso negato: user ${decoded.userId} non ha accesso al tenant ${decoded.tenantId}`);
+      return res.status(403).json({ error: 'Accesso negato a questo tenant' });
     }
 
     req.tenantId = decoded.tenantId;
     req.tenant = await db.getTenant(decoded.tenantId);
     req.user = await db.getUserById(decoded.userId);
+    req.userRole = role;
 
-    console.log(`[DEBUG Auth] Tenant: ${req.tenant?.name} (${req.tenantId}), User: ${req.user?.email}, Route: ${req.originalUrl}`);
+    if (!req.tenant || !req.user) {
+      return res.status(404).json({ error: 'Tenant o utente non trovato' });
+    }
+
     next();
   } catch (error) {
     console.error('Auth error in legacyTenant:', error);
-    return res.status(401).json({ error: 'Errore autenticazione' });
+    return res.status(500).json({ error: 'Errore autenticazione' });
   }
 };
+
+// ========== HEALTH CHECK ==========
+app.get('/health', async (req, res) => {
+  try {
+    const dbCheck = await db.pool.query('SELECT 1');
+    res.json({
+      status: 'ok',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      database: dbCheck ? 'connected' : 'error'
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'error',
+      database: 'disconnected'
+    });
+  }
+});
 
 // ========== API ROUTES ==========
 
@@ -1440,10 +1657,12 @@ app.get('/api/clients', legacyTenant, async (req, res) => {
       daysPerWeek: c.days_per_week,
       lastContact: c.last_activity,
       createdAt: c.created_at,
-      // Nuovi metadati AI Churn
+      messagesCount: parseInt(c.messages_count) || 0,
       churnRisk: c.churn_risk || null,
       daysSinceLastCheckin: c.days_since_last_checkin !== null ? c.days_since_last_checkin : null,
-      checkinTrend: c.checkin_trend || null
+      checkinTrend: c.checkin_trend || null,
+      latestWorkoutId: c.latest_workout_id || null,
+      latestWorkoutDate: c.latest_workout_date || null
     })));
   } catch (error) {
     console.error('Errore clients:', error);
@@ -1486,6 +1705,34 @@ app.post('/api/clients', legacyTenant, async (req, res) => {
     });
   } catch (error) {
     console.error('Errore creazione cliente:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Elimina cliente
+app.delete('/api/clients/:phone', legacyTenant, async (req, res) => {
+  try {
+    const { phone } = req.params;
+
+    const client = await db.getClient(req.tenantId, phone);
+    if (!client) {
+      return res.status(404).json({ error: 'Cliente non trovato' });
+    }
+
+    // Elimina dati correlati e poi il cliente
+    await db.pool.query('DELETE FROM messages WHERE tenant_id = $1 AND phone = $2', [req.tenantId, phone]);
+    await db.pool.query('DELETE FROM checkins WHERE tenant_id = $1 AND phone = $2', [req.tenantId, phone]);
+    await db.pool.query('DELETE FROM client_scoring WHERE tenant_id = $1 AND phone = $2', [req.tenantId, phone]);
+    await db.pool.query('DELETE FROM client_profiles WHERE tenant_id = $1 AND phone = $2', [req.tenantId, phone]);
+    await db.pool.query('DELETE FROM workout_plans WHERE tenant_id = $1 AND phone = $2', [req.tenantId, phone]);
+    await db.pool.query('DELETE FROM brain_actions WHERE tenant_id = $1 AND phone = $2', [req.tenantId, phone]);
+    await db.pool.query('DELETE FROM referral_codes WHERE tenant_id = $1 AND referrer_phone = $2', [req.tenantId, phone]);
+    await db.pool.query('DELETE FROM referral_rewards WHERE tenant_id = $1 AND phone = $2', [req.tenantId, phone]);
+    await db.pool.query('DELETE FROM clients WHERE tenant_id = $1 AND phone = $2', [req.tenantId, phone]);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Errore eliminazione cliente:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2447,9 +2694,11 @@ app.put('/api/brain/settings', legacyTenant, async (req, res) => {
 app.get('/api/ai/config', legacyTenant, async (req, res) => {
   try {
     res.json({
+      gymName: req.tenant?.name || '',
       coachName: req.tenant?.coach_name || 'Coach AI',
+      personality: req.tenant?.coach_personality || 'amichevole e motivante',
       useEmoji: req.tenant?.use_emoji !== false,
-      customPrompt: req.tenant?.custom_system_prompt || ''
+      systemPrompt: req.tenant?.custom_system_prompt || ''
     });
   } catch (error) {
     console.error('Errore AI config:', error);
@@ -2470,9 +2719,11 @@ app.get('/api/ai/preview', legacyTenant, async (req, res) => {
 app.post('/api/ai/config', legacyTenant, async (req, res) => {
   try {
     await db.updateTenant(req.tenantId, {
+      name: req.body.gymName,
       coachName: req.body.coachName,
+      coachPersonality: req.body.personality,
       useEmoji: req.body.useEmoji,
-      customSystemPrompt: req.body.customPrompt
+      customSystemPrompt: req.body.systemPrompt
     });
     res.json({ success: true });
   } catch (error) {
@@ -2485,10 +2736,21 @@ app.post('/api/ai/reset', legacyTenant, async (req, res) => {
   try {
     await db.updateTenant(req.tenantId, {
       coachName: 'Coach AI',
+      coachPersonality: 'amichevole e motivante',
       useEmoji: true,
       customSystemPrompt: null
     });
-    res.json({ success: true });
+    const tenant = await db.getTenant(req.tenantId);
+    res.json({
+      success: true,
+      config: {
+        gymName: tenant?.name || '',
+        coachName: tenant?.coach_name || 'Coach AI',
+        personality: tenant?.coach_personality || 'amichevole e motivante',
+        useEmoji: tenant?.use_emoji !== false,
+        systemPrompt: ''
+      }
+    });
   } catch (error) {
     console.error('Errore reset AI:', error);
     res.status(500).json({ error: error.message });
@@ -2900,7 +3162,6 @@ app.put('/api/superadmin/tenants/:id', requireAuth, requireSuperadmin, async (re
       subscriptionNotes || null,
       id
     ]);
-
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Tenant non trovato' });
     }
@@ -2908,6 +3169,38 @@ app.put('/api/superadmin/tenants/:id', requireAuth, requireSuperadmin, async (re
     res.json({ success: true, tenant: result.rows[0] });
   } catch (error) {
     console.error('Errore aggiornamento tenant:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Cambia stato tenant (sospensione manuale)
+app.put('/api/superadmin/tenants/:id/status', requireAuth, requireSuperadmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // 'active' or 'suspended'
+
+    if (!['active', 'suspended'].includes(status)) {
+      return res.status(400).json({ error: 'Status non valido (usa active o suspended)' });
+    }
+
+    // Assuming db.updateTenant exists and returns the updated tenant or null
+    // If not, you'd need to implement the update logic here.
+    const updated = await db.pool.query(`
+      UPDATE tenants
+      SET subscription_status = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING *
+    `, [status, id]);
+
+    if (updated.rows.length === 0) {
+      return res.status(404).json({ error: 'Tenant non trovato' });
+    }
+
+    // Assuming logger is defined elsewhere, replacing with console.log for this context
+    console.log(`Stato tenant ${updated.rows[0].name} aggiornato a ${status}`);
+    res.json({ success: true, tenant: updated.rows[0] });
+  } catch (error) {
+    console.error('Errore aggiornamento stato tenant:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -3229,7 +3522,7 @@ app.post('/api/onboarding/:token/step/:step', async (req, res) => {
         return res.status(400).json({ error: 'La password deve avere almeno 8 caratteri' });
       }
       // Check if email is already registered
-      const existingUser = await db.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+      const existingUser = await db.pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
       if (existingUser.rows.length > 0) {
         return res.status(400).json({ error: 'Email già registrata. Usa un\'altra email.' });
       }
@@ -3363,13 +3656,13 @@ app.post('/api/onboarding/:token/complete', async (req, res) => {
       const passwordHash = await bcrypt.hash(step2.password, 10);
 
       // Create user
-      const userResult = await db.query(
+      const userResult = await db.pool.query(
         'INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id',
         [step2.email.toLowerCase(), passwordHash, step2.adminName || 'Admin']
       );
 
       // Link user to tenant as owner
-      await db.query(
+      await db.pool.query(
         'INSERT INTO user_tenants (user_id, tenant_id, role) VALUES ($1, $2, $3)',
         [userResult.rows[0].id, onboarding.tenant_id, 'owner']
       );
@@ -3627,7 +3920,7 @@ async function startServer() {
     automation.start();
 
     // Initialize and start Brain AI
-    brain.init(db, sendWhatsAppMessage, aiClient, AI_MODEL, useAnthropic);
+    brain.init(db, sendWhatsAppMessage, aiClient, AI_MODEL, useAnthropic, enqueueWhatsAppMessage);
     brain.start();
 
     // Initialize and start monitoring system
@@ -3656,11 +3949,34 @@ async function startServer() {
     }
 
     const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`Coach AI Backend (Multi-Tenant) running on port ${PORT}`);
       console.log('Marketing Automation: ACTIVE');
       console.log('Monitoring System: ACTIVE');
       console.log(`Backup System: ${BackupSystem ? 'ACTIVE (daily at 03:00)' : 'NOT AVAILABLE'}`);
+    });
+
+    // Graceful shutdown
+    const gracefulShutdown = (signal) => {
+      console.log(`\n${signal} received. Shutting down gracefully...`);
+      server.close(() => {
+        console.log('HTTP server closed');
+        db.pool.end().then(() => {
+          console.log('Database pool closed');
+          process.exit(0);
+        });
+      });
+      // Force exit dopo 10 secondi
+      setTimeout(() => {
+        console.error('Forced shutdown after timeout');
+        process.exit(1);
+      }, 10000);
+    };
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('Unhandled Rejection at:', promise, 'reason:', reason);
     });
   } catch (error) {
     console.error('Errore avvio server:', error);

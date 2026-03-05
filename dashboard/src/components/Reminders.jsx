@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react'
 import { Bell, Clock, MessageSquare, Save, Play, Users, CheckCircle, AlertCircle } from 'lucide-react'
 
-const API_URL = ''
+import { useAuth } from '../context/AuthContext'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function Reminders() {
+  const { authFetch } = useAuth()
   const [config, setConfig] = useState({
     enabled: true,
     checkIntervalMinutes: 60,
@@ -21,7 +24,7 @@ function Reminders() {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/reminders/config`)
+      const res = await authFetch(`${API_URL}/api/reminders/config`)
       if (res.ok) {
         const data = await res.json()
         setConfig(data)
@@ -35,7 +38,7 @@ function Reminders() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/reminders/stats`)
+      const res = await authFetch(`${API_URL}/api/reminders/stats`)
       if (res.ok) {
         const data = await res.json()
         setStats(data)
@@ -48,7 +51,7 @@ function Reminders() {
   const saveConfig = async () => {
     setSaving(true)
     try {
-      const res = await fetch(`${API_URL}/api/reminders/config`, {
+      const res = await authFetch(`${API_URL}/api/reminders/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)
@@ -66,7 +69,7 @@ function Reminders() {
 
   const triggerCheck = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/reminders/check`, { method: 'POST' })
+      const res = await authFetch(`${API_URL}/api/reminders/check`, { method: 'POST' })
       if (res.ok) {
         setMessage({ type: 'success', text: 'Controllo promemoria eseguito!' })
         fetchStats()

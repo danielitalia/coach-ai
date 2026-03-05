@@ -2,6 +2,8 @@ import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Dumbbell, Mail, Lock, Eye, EyeOff, AlertCircle, Loader2, User, Building2, CheckCircle } from 'lucide-react'
 
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 function RegisterPage() {
   const navigate = useNavigate()
   const [formData, setFormData] = useState({
@@ -42,7 +44,7 @@ function RegisterPage() {
     }
 
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await fetch(`${API_URL}/api/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

@@ -6,9 +6,12 @@ import {
   MessageCircle
 } from 'lucide-react'
 
-const API_URL = ''
+import { useAuth } from '../context/AuthContext'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function WorkoutPlans() {
+  const { authFetch } = useAuth()
   const [plans, setPlans] = useState([])
   const [clients, setClients] = useState([])
   const [stats, setStats] = useState(null)
@@ -31,7 +34,7 @@ function WorkoutPlans() {
 
   const fetchPlans = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/workouts`)
+      const res = await authFetch(`${API_URL}/api/workouts`)
       if (res.ok) {
         const data = await res.json()
         setPlans(data)
@@ -45,7 +48,7 @@ function WorkoutPlans() {
 
   const fetchClients = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/clients`)
+      const res = await authFetch(`${API_URL}/api/clients`)
       if (res.ok) {
         const data = await res.json()
         setClients(data)
@@ -57,7 +60,7 @@ function WorkoutPlans() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/workouts-stats`)
+      const res = await authFetch(`${API_URL}/api/workouts-stats`)
       if (res.ok) {
         const data = await res.json()
         setStats(data)
@@ -69,8 +72,21 @@ function WorkoutPlans() {
 
   const downloadPDF = async (plan) => {
     try {
-      window.open(`${API_URL}/api/workouts/${plan.phone}/${plan.id}/pdf`, '_blank')
-      showMessage('success', 'Download PDF avviato')
+      const res = await authFetch(`${API_URL}/api/workouts/${plan.phone}/${plan.id}/pdf`)
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `scheda-${plan.client_name || plan.phone}.pdf`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        showMessage('success', 'Download PDF avviato')
+      } else {
+        showMessage('error', 'Errore download PDF')
+      }
     } catch (err) {
       showMessage('error', 'Errore download PDF')
     }
@@ -78,7 +94,7 @@ function WorkoutPlans() {
 
   const sendToWhatsApp = async (plan) => {
     try {
-      const res = await fetch(`${API_URL}/api/workouts/${plan.phone}/${plan.id}/send`, {
+      const res = await authFetch(`${API_URL}/api/workouts/${plan.phone}/${plan.id}/send`, {
         method: 'POST'
       })
       if (res.ok) {
@@ -95,7 +111,7 @@ function WorkoutPlans() {
     if (!confirm('Sei sicuro di voler eliminare questa scheda?')) return
 
     try {
-      const res = await fetch(`${API_URL}/api/workouts/${plan.phone}/${plan.id}`, {
+      const res = await authFetch(`${API_URL}/api/workouts/${plan.phone}/${plan.id}`, {
         method: 'DELETE'
       })
       if (res.ok) {
@@ -124,7 +140,7 @@ function WorkoutPlans() {
 
   const filteredPlans = plans.filter(plan => {
     const matchesSearch = plan.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         plan.phone.includes(searchTerm)
+      plan.phone.includes(searchTerm)
     const matchesObjective = !filterObjective || plan.objective === filterObjective
     return matchesSearch && matchesObjective
   })
@@ -162,9 +178,8 @@ function WorkoutPlans() {
 
       {/* Message */}
       {message && (
-        <div className={`p-4 rounded-lg flex items-center gap-2 ${
-          message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-        }`}>
+        <div className={`p-4 rounded-lg flex items-center gap-2 ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+          }`}>
           {message.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
           {message.text}
         </div>
@@ -393,6 +408,7 @@ function WorkoutPlans() {
 
 // ========== EDIT WORKOUT MODAL ==========
 function EditWorkoutModal({ plan, onClose, onSaved }) {
+  const { authFetch } = useAuth()
   const [editedPlan, setEditedPlan] = useState(plan)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -403,7 +419,7 @@ function EditWorkoutModal({ plan, onClose, onSaved }) {
     setError(null)
 
     try {
-      const res = await fetch(`${API_URL}/api/workouts/${editedPlan.phone}/${editedPlan.id}`, {
+      const res = await authFetch(`${API_URL}/api/workouts/${editedPlan.phone}/${editedPlan.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -504,11 +520,10 @@ function EditWorkoutModal({ plan, onClose, onSaved }) {
               <button
                 key={idx}
                 onClick={() => setActiveDay(idx)}
-                className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${
-                  activeDay === idx
+                className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap transition-colors ${activeDay === idx
                     ? 'bg-primary-500 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                  }`}
               >
                 {workout.day}
               </button>
@@ -654,6 +669,7 @@ function EditWorkoutModal({ plan, onClose, onSaved }) {
 
 // ========== SEND MESSAGE MODAL ==========
 function SendMessageModal({ plan, onClose, onSent }) {
+  const { authFetch } = useAuth()
   const [messageText, setMessageText] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -673,7 +689,7 @@ function SendMessageModal({ plan, onClose, onSent }) {
     setError(null)
 
     try {
-      const res = await fetch(`${API_URL}/api/messages/send`, {
+      const res = await authFetch(`${API_URL}/api/messages/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -772,6 +788,7 @@ function SendMessageModal({ plan, onClose, onSent }) {
 
 // ========== CREATE WORKOUT MODAL ==========
 function CreateWorkoutModal({ clients, onClose, onCreated }) {
+  const { authFetch } = useAuth()
   const [formData, setFormData] = useState({
     phone: '',
     name: '',
@@ -789,7 +806,7 @@ function CreateWorkoutModal({ clients, onClose, onCreated }) {
     setError(null)
 
     try {
-      const res = await fetch(`/api/workouts/generate`, {
+      const res = await authFetch(`${API_URL}/api/workouts/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -852,7 +869,7 @@ function CreateWorkoutModal({ clients, onClose, onCreated }) {
             ) : (
               <input
                 type="text"
-                placeholder="Numero telefono (es. 393331234567)"
+                placeholder="Prefisso + Numero (es. 393331234567)"
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"

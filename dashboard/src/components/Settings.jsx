@@ -5,7 +5,12 @@ import {
   CheckCircle, AlertCircle, Loader2
 } from 'lucide-react'
 
+import { useAuth } from '../context/AuthContext'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 export default function Settings() {
+  const { authFetch } = useAuth()
   const [aiConfig, setAiConfig] = useState({
     gymName: '',
     coachName: '',
@@ -25,7 +30,7 @@ export default function Settings() {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch('/api/ai/config')
+      const res = await authFetch(`${API_URL}/api/ai/config`)
       if (res.ok) {
         const data = await res.json()
         setAiConfig(data)
@@ -40,7 +45,7 @@ export default function Settings() {
 
   const fetchPreview = async () => {
     try {
-      const res = await fetch('/api/ai/preview')
+      const res = await authFetch(`${API_URL}/api/ai/preview`)
       if (res.ok) {
         const data = await res.json()
         setPreview(data.prompt)
@@ -55,7 +60,7 @@ export default function Settings() {
     setSaving(true)
     setMessage({ type: '', text: '' })
     try {
-      const res = await fetch('/api/ai/config', {
+      const res = await authFetch(`${API_URL}/api/ai/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(aiConfig)
@@ -79,7 +84,7 @@ export default function Settings() {
 
     setSaving(true)
     try {
-      const res = await fetch('/api/ai/reset', {
+      const res = await authFetch(`${API_URL}/api/ai/reset`, {
         method: 'POST'
       })
       if (res.ok) {

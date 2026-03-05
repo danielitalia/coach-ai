@@ -21,10 +21,39 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  # Redis - Message queue (BullMQ)
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - coachai-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 128M
 
   # Evolution API - WhatsApp Gateway
   evolution-api:
-    image: atendai/evolution-api:v2.3.7
+    image: evoapicloud/evolution-api:v2.3.7
     restart: always
     environment:
       - SERVER_URL=${SERVER_URL:?Server URL required}
@@ -54,6 +83,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          memory: 256M
 
   # Coach AI Backend
   backend:
@@ -65,8 +106,12 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - DATABASE_URL=postgresql://${POSTGRES_USER:-coachai}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-coachai}
+      - JWT_SECRET=${JWT_SECRET:?JWT secret required}
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://coachpalestra.it}
       - EVOLUTION_API_URL=http://evolution-api:8080
       - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
       - OPENAI_API_KEY=${OPENAI_API_KEY:?OpenAI API key required}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
@@ -77,6 +122,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       evolution-api:
         condition: service_started
     healthcheck:
@@ -84,6 +131,13 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          memory: 512M
 
   # Dashboard (Nginx serving static files + reverse proxy)
   dashboard:
@@ -100,9 +154,22 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          memory: 128M
 
 volumes:
   postgres_data:
+  redis_data:
   evolution_instances:
 
 networks:

@@ -115,6 +115,28 @@ ALTER TABLE config ADD CONSTRAINT config_tenant_key_unique UNIQUE(tenant_id, key
 ALTER TABLE config ADD COLUMN IF NOT EXISTS id SERIAL;
 ALTER TABLE config ADD CONSTRAINT config_pkey PRIMARY KEY (id);
 
+-- Creazione chiavi esterne composite per supportare la navigazione multi-tenant su clients
+-- Rimuoviamo i vecchi constraints (se presenti) per ricrearli compositi
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_phone_fkey;
+ALTER TABLE messages ADD CONSTRAINT messages_tenant_phone_fkey FOREIGN KEY (tenant_id, phone) REFERENCES clients(tenant_id, phone) ON DELETE CASCADE;
+
+ALTER TABLE workout_plans DROP CONSTRAINT IF EXISTS workout_plans_phone_fkey;
+ALTER TABLE workout_plans ADD CONSTRAINT workout_plans_tenant_phone_fkey FOREIGN KEY (tenant_id, phone) REFERENCES clients(tenant_id, phone) ON DELETE CASCADE;
+
+ALTER TABLE sent_reminders DROP CONSTRAINT IF EXISTS sent_reminders_phone_fkey;
+ALTER TABLE sent_reminders ADD CONSTRAINT sent_reminders_tenant_phone_fkey FOREIGN KEY (tenant_id, phone) REFERENCES clients(tenant_id, phone) ON DELETE CASCADE;
+
+ALTER TABLE checkins DROP CONSTRAINT IF EXISTS checkins_phone_fkey;
+ALTER TABLE checkins ADD CONSTRAINT checkins_tenant_phone_fkey FOREIGN KEY (tenant_id, phone) REFERENCES clients(tenant_id, phone) ON DELETE CASCADE;
+
+ALTER TABLE referrals DROP CONSTRAINT IF EXISTS referrals_referrer_phone_fkey;
+ALTER TABLE referrals ADD CONSTRAINT referrals_tenant_referrer_fkey FOREIGN KEY (tenant_id, referrer_phone) REFERENCES clients(tenant_id, phone) ON DELETE CASCADE;
+ALTER TABLE referrals DROP CONSTRAINT IF EXISTS referrals_referred_phone_fkey;
+ALTER TABLE referrals ADD CONSTRAINT referrals_tenant_referred_fkey FOREIGN KEY (tenant_id, referred_phone) REFERENCES clients(tenant_id, phone) ON DELETE SET NULL;
+
+ALTER TABLE rewards DROP CONSTRAINT IF EXISTS rewards_phone_fkey;
+ALTER TABLE rewards ADD CONSTRAINT rewards_tenant_phone_fkey FOREIGN KEY (tenant_id, phone) REFERENCES clients(tenant_id, phone) ON DELETE CASCADE;
+
 -- ========== INDICI PER PERFORMANCE MULTI-TENANT ==========
 
 CREATE INDEX IF NOT EXISTS idx_clients_tenant ON clients(tenant_id);
@@ -129,6 +151,15 @@ CREATE INDEX IF NOT EXISTS idx_user_tenants_tenant ON user_tenants(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_tenants_slug ON tenants(slug);
 CREATE INDEX IF NOT EXISTS idx_tenants_whatsapp ON tenants(whatsapp_number);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- Aggiunta indici compositi su tenant_id + phone
+CREATE INDEX IF NOT EXISTS idx_clients_tenant_phone ON clients(tenant_id, phone);
+CREATE INDEX IF NOT EXISTS idx_messages_tenant_phone ON messages(tenant_id, phone);
+CREATE INDEX IF NOT EXISTS idx_workout_plans_tenant_phone ON workout_plans(tenant_id, phone);
+CREATE INDEX IF NOT EXISTS idx_sent_reminders_tenant_phone ON sent_reminders(tenant_id, phone);
+CREATE INDEX IF NOT EXISTS idx_checkins_tenant_phone ON checkins(tenant_id, phone);
+CREATE INDEX IF NOT EXISTS idx_referrals_tenant_referrer ON referrals(tenant_id, referrer_phone);
+CREATE INDEX IF NOT EXISTS idx_rewards_tenant_phone ON rewards(tenant_id, phone);
 
 -- ========== TABELLA SESSIONI (per JWT refresh tokens) ==========
 
@@ -213,3 +244,19 @@ DROP TRIGGER IF EXISTS update_clients_updated_at ON clients;
 CREATE TRIGGER update_clients_updated_at
     BEFORE UPDATE ON clients
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ========== BRAIN AI TABELLE ==========
+
+CREATE TABLE IF NOT EXISTS brain_recoveries (
+    id SERIAL PRIMARY KEY,
+    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+    phone VARCHAR(30) NOT NULL,
+    action_id INTEGER REFERENCES brain_actions(id) ON DELETE CASCADE,
+    recovered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    days_since_action INTEGER,
+    value_saved DECIMAL(10,2) DEFAULT 0.00,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(tenant_id, action_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recoveries_tenant_phone ON brain_recoveries(tenant_id, phone);

@@ -2,21 +2,29 @@ import React, { useState, useEffect, useCallback } from 'react'
 import {
   QrCode, Users, TrendingUp, Calendar, Clock, Download,
   Printer, RefreshCw, Loader2, AlertCircle, CheckCircle,
-  Flame, Trophy, User
+  Flame, Trophy, User, UserPlus, X
 } from 'lucide-react'
 
-const API_URL = ''
+import { useAuth } from '../context/AuthContext'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 function CheckIn() {
+  const { authFetch } = useAuth()
   const [qrData, setQrData] = useState(null)
   const [todayCheckins, setTodayCheckins] = useState([])
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [showAddClient, setShowAddClient] = useState(null) // phone del checkin da registrare
+  const [addClientForm, setAddClientForm] = useState({ name: '', objective: '', experience: '', daysPerWeek: 3 })
+  const [addClientLoading, setAddClientLoading] = useState(false)
+  const [addClientError, setAddClientError] = useState('')
+  const [addClientSuccess, setAddClientSuccess] = useState('')
 
   const fetchQrCode = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/checkin-qrcode`)
+      const res = await authFetch(`${API_URL}/api/checkin-qrcode`)
       if (res.ok) {
         const data = await res.json()
         setQrData(data)
@@ -29,11 +37,11 @@ function CheckIn() {
       console.error('Errore fetch QR:', err)
       setError('Errore di connessione')
     }
-  }, [])
+  }, [authFetch])
 
   const fetchTodayCheckins = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/checkins/today`)
+      const res = await authFetch(`${API_URL}/api/checkins/today`)
       if (res.ok) {
         const data = await res.json()
         setTodayCheckins(data)
@@ -41,11 +49,11 @@ function CheckIn() {
     } catch (err) {
       console.error('Errore fetch checkins:', err)
     }
-  }, [])
+  }, [authFetch])
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/checkins-stats`)
+      const res = await authFetch(`${API_URL}/api/checkins-stats`)
       if (res.ok) {
         const data = await res.json()
         setStats(data)
@@ -53,7 +61,7 @@ function CheckIn() {
     } catch (err) {
       console.error('Errore fetch stats:', err)
     }
-  }, [])
+  }, [authFetch])
 
   useEffect(() => {
     const init = async () => {
@@ -67,6 +75,54 @@ function CheckIn() {
     const interval = setInterval(fetchTodayCheckins, 30000)
     return () => clearInterval(interval)
   }, [fetchQrCode, fetchTodayCheckins, fetchStats])
+
+  const handleAddClient = async (e) => {
+    e.preventDefault()
+    if (!showAddClient) return
+    setAddClientLoading(true)
+    setAddClientError('')
+
+    try {
+      const res = await authFetch(`${API_URL}/api/clients`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: showAddClient,
+          name: addClientForm.name,
+          objective: addClientForm.objective,
+          experience: addClientForm.experience,
+          daysPerWeek: addClientForm.daysPerWeek
+        })
+      })
+
+      if (res.ok) {
+        setAddClientSuccess(`${addClientForm.name} registrato come cliente!`)
+        setShowAddClient(null)
+        setAddClientForm({ name: '', objective: '', experience: '', daysPerWeek: 3 })
+        // Aggiorna la lista checkin per riflettere il nuovo stato
+        fetchTodayCheckins()
+        setTimeout(() => setAddClientSuccess(''), 4000)
+      } else {
+        const data = await res.json()
+        setAddClientError(data.error || 'Errore nella registrazione')
+      }
+    } catch (err) {
+      setAddClientError('Errore di connessione')
+    } finally {
+      setAddClientLoading(false)
+    }
+  }
+
+  const openAddClient = (checkin) => {
+    setShowAddClient(checkin.phone)
+    setAddClientForm({
+      name: checkin.name || '',
+      objective: '',
+      experience: '',
+      daysPerWeek: 3
+    })
+    setAddClientError('')
+  }
 
   const handlePrint = () => {
     if (!qrData?.qrCodeUrl) return
@@ -160,6 +216,14 @@ function CheckIn() {
         <h2 className="text-2xl font-bold text-gray-900">Check-in Palestra</h2>
         <p className="text-gray-500 mt-1">QR Code per la registrazione automatica delle presenze</p>
       </div>
+
+      {/* Success message */}
+      {addClientSuccess && (
+        <div className="p-4 bg-green-50 text-green-700 rounded-lg flex items-center gap-2">
+          <CheckCircle className="w-5 h-5" />
+          {addClientSuccess}
+        </div>
+      )}
 
       {/* Stats Cards */}
       {stats && (
@@ -311,22 +375,41 @@ function CheckIn() {
                   className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
-                      <User className="w-5 h-5 text-primary-600" />
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${checkin.is_client ? 'bg-primary-100' : 'bg-orange-100'}`}>
+                      <User className={`w-5 h-5 ${checkin.is_client ? 'text-primary-600' : 'text-orange-600'}`} />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">{checkin.name}</p>
-                      <p className="text-sm text-gray-500">{checkin.workoutDay || 'Allenamento libero'}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-gray-900">{checkin.name || `+${checkin.phone}`}</p>
+                        {!checkin.is_client && (
+                          <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[10px] font-medium rounded uppercase">
+                            Non registrato
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-500">{checkin.workoutDay || checkin.workout_day || 'Allenamento libero'}</p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-gray-900">
-                      {new Date(checkin.checkedInAt).toLocaleTimeString('it-IT', {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </p>
-                    <p className="text-xs text-gray-500">check-in</p>
+                  <div className="flex items-center gap-2">
+                    {!checkin.is_client && (
+                      <button
+                        onClick={() => openAddClient(checkin)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 bg-primary-500 text-white text-xs font-medium rounded-lg hover:bg-primary-600 transition-colors"
+                        title="Registra come cliente"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Registra</span>
+                      </button>
+                    )}
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-gray-900">
+                        {new Date(checkin.checked_in_at || checkin.checkedInAt).toLocaleTimeString('it-IT', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                      <p className="text-xs text-gray-500">check-in</p>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -356,6 +439,108 @@ function CheckIn() {
           </div>
         </div>
       </div>
+
+      {/* Modal Aggiungi Cliente */}
+      {showAddClient && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-primary-500" />
+                Registra Cliente
+              </h3>
+              <button onClick={() => setShowAddClient(null)} className="p-2 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-500 mb-4">
+              Telefono: <strong>+{showAddClient}</strong>
+            </p>
+
+            {addClientError && (
+              <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
+                {addClientError}
+              </div>
+            )}
+
+            <form onSubmit={handleAddClient} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Mario Rossi"
+                  value={addClientForm.name}
+                  onChange={(e) => setAddClientForm({ ...addClientForm, name: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Obiettivo</label>
+                <select
+                  value={addClientForm.objective}
+                  onChange={(e) => setAddClientForm({ ...addClientForm, objective: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">Seleziona...</option>
+                  <option value="Dimagrire">Dimagrire</option>
+                  <option value="Massa muscolare">Massa muscolare</option>
+                  <option value="Tonificare">Tonificare</option>
+                  <option value="Salute generale">Salute generale</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Esperienza</label>
+                <select
+                  value={addClientForm.experience}
+                  onChange={(e) => setAddClientForm({ ...addClientForm, experience: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">Seleziona...</option>
+                  <option value="Principiante">Principiante</option>
+                  <option value="Intermedio">Intermedio</option>
+                  <option value="Esperto">Esperto</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Giorni/Settimana</label>
+                <select
+                  value={addClientForm.daysPerWeek}
+                  onChange={(e) => setAddClientForm({ ...addClientForm, daysPerWeek: parseInt(e.target.value) })}
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value={2}>2 giorni</option>
+                  <option value={3}>3 giorni</option>
+                  <option value={4}>4 giorni</option>
+                  <option value={5}>5 giorni</option>
+                  <option value={6}>6 giorni</option>
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddClient(null)}
+                  className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="submit"
+                  disabled={addClientLoading}
+                  className="flex-1 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
+                >
+                  {addClientLoading ? 'Registrazione...' : 'Registra'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

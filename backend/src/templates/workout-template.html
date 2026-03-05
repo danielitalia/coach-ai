@@ -114,10 +114,7 @@
         }
 
         .exercise {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
+            padding: 15px 0;
             border-bottom: 1px solid #e2e8f0;
         }
 
@@ -125,23 +122,85 @@
             border-bottom: none;
         }
 
+        .exercise-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
         .exercise-name {
-            font-weight: 500;
-            color: #334155;
+            font-weight: 600;
+            color: #1e293b;
+            font-size: 15px;
         }
 
         .exercise-details {
             display: flex;
-            gap: 10px;
+            gap: 8px;
+            flex-shrink: 0;
         }
 
         .exercise-badge {
             background: {{primaryColor}}15;
             color: {{primaryColor}};
-            padding: 5px 12px;
+            padding: 4px 10px;
             border-radius: 20px;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .exercise-muscles {
+            font-size: 12px;
+            color: {{primaryColor}};
+            font-weight: 500;
+            margin-bottom: 6px;
+        }
+
+        .exercise-description {
+            font-size: 13px;
+            color: #64748b;
+            line-height: 1.5;
+        }
+
+        .exercise-toggle {
+            display: none;
+        }
+
+        .exercise-toggle-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            color: {{primaryColor}};
+            cursor: pointer;
+            font-weight: 500;
+            margin-top: 4px;
+        }
+
+        .exercise-toggle-label .arrow {
+            transition: transform 0.2s;
+        }
+
+        .exercise-toggle:checked ~ .exercise-body .exercise-description {
+            display: block;
+        }
+
+        .exercise-toggle:checked ~ .exercise-toggle-label .arrow {
+            transform: rotate(90deg);
+        }
+
+        @media (max-width: 480px) {
+            .exercise-top {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 6px;
+            }
+
+            .exercise-details {
+                align-self: flex-start;
+            }
         }
 
         .tips-section {
