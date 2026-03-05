@@ -783,7 +783,7 @@ nft list chain ip filter DOCKER-USER
 
 - Daemon systemd **disabilitato**: `systemctl disable openclaw`
 - Script healthcheck shell **ancora attivo**: `0 */2 * * * /opt/openclaw/healthcheck-telegram.sh`
-- Telegram bot: `@daniel0805bot` (token: `7681663796:AAEROSC9ZJaWodhv0zq6ooSe6Us6X6WjQtY`)
+- Telegram bot: `@daniel0805bot` (token: `ROTATED_OR_REMOVED`)
 - Chat ID: `1483894435`
 
 ## SSH Access
