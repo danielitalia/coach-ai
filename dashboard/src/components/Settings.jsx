@@ -51,7 +51,7 @@ export default function Settings() {
   const fetchTelegramDetails = async () => {
     try {
       setLoadingTelegram(true)
-      const res = await authFetch(`${API_URL}/api/tenants/telegram`)
+      const res = await authFetch(`${API_URL}/api/tenant/telegram`)
       if (res.ok) {
         const data = await res.json()
         setTelegramDetails({ pin: data.pin, connected: data.connected })
@@ -68,7 +68,7 @@ export default function Settings() {
 
     setResettingTelegram(true)
     try {
-      const res = await authFetch(`${API_URL}/api/tenants/telegram/reset`, { method: 'POST' })
+      const res = await authFetch(`${API_URL}/api/tenant/telegram/reset`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
         setTelegramDetails({ pin: data.pin, connected: data.connected })
