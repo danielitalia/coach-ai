@@ -25,6 +25,10 @@ CREATE TABLE IF NOT EXISTS tenants (
     use_emoji BOOLEAN DEFAULT TRUE,
     custom_system_prompt TEXT,
 
+    -- Digital CEO (Telegram)
+    telegram_chat_id VARCHAR(50),
+    telegram_pin VARCHAR(20),
+
     -- Subscription
     subscription_plan VARCHAR(50) DEFAULT 'trial', -- trial, basic, pro, enterprise
     subscription_status VARCHAR(50) DEFAULT 'active', -- active, past_due, cancelled, expired

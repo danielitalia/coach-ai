@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Settings as SettingsIcon, Bot, Save, RotateCcw,
   Eye, Sparkles, Building2, User, MessageSquare,
-  CheckCircle, AlertCircle, Loader2
+  CheckCircle, AlertCircle, Loader2, Smartphone, Copy, RefreshCw
 } from 'lucide-react'
 
 import { useAuth } from '../context/AuthContext'
@@ -24,8 +24,13 @@ export default function Settings() {
   const [showPreview, setShowPreview] = useState(false)
   const [message, setMessage] = useState({ type: '', text: '' })
 
+  const [telegramDetails, setTelegramDetails] = useState({ pin: '', connected: false })
+  const [loadingTelegram, setLoadingTelegram] = useState(true)
+  const [resettingTelegram, setResettingTelegram] = useState(false)
+
   useEffect(() => {
     fetchConfig()
+    fetchTelegramDetails()
   }, [])
 
   const fetchConfig = async () => {
@@ -41,6 +46,46 @@ export default function Settings() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const fetchTelegramDetails = async () => {
+    try {
+      setLoadingTelegram(true)
+      const res = await authFetch(`${API_URL}/api/tenants/telegram`)
+      if (res.ok) {
+        const data = await res.json()
+        setTelegramDetails({ pin: data.pin, connected: data.connected })
+      }
+    } catch (err) {
+      console.error('Errore caricamento telegram:', err)
+    } finally {
+      setLoadingTelegram(false)
+    }
+  }
+
+  const handleResetTelegram = async () => {
+    if (!window.confirm('Sei sicuro di voler scollegare il tuo account Telegram attuale e generare un nuovo PIN?')) return
+
+    setResettingTelegram(true)
+    try {
+      const res = await authFetch(`${API_URL}/api/tenants/telegram/reset`, { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
+        setTelegramDetails({ pin: data.pin, connected: data.connected })
+        setMessage({ type: 'success', text: 'PIN Telegram rigenerato!' })
+        setTimeout(() => setMessage({ type: '', text: '' }), 3000)
+      }
+    } catch (err) {
+      console.error('Errore reset telegram:', err)
+    } finally {
+      setResettingTelegram(false)
+    }
+  }
+
+  const copyPin = () => {
+    navigator.clipboard.writeText(telegramDetails.pin)
+    setMessage({ type: 'success', text: 'PIN copiato negli appunti!' })
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000)
   }
 
   const fetchPreview = async () => {
@@ -142,9 +187,8 @@ export default function Settings() {
 
       {/* Status message */}
       {message.text && (
-        <div className={`flex items-center gap-2 p-4 rounded-lg ${
-          message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-        }`}>
+        <div className={`flex items-center gap-2 p-4 rounded-lg ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+          }`}>
           {message.type === 'success' ? (
             <CheckCircle className="w-5 h-5" />
           ) : (
@@ -170,6 +214,76 @@ export default function Settings() {
           <span className="text-green-700 font-medium">Connesso</span>
           <span className="text-gray-500">+39 351 956 6388</span>
         </div>
+      </div>
+
+      {/* CEO Digitale Telegram */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+              <Smartphone className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900">CEO Digitale (Telegram Bot)</h3>
+              <p className="text-sm text-gray-500">Collega il tuo Telegram per ricevere statistiche in tempo reale</p>
+            </div>
+          </div>
+          <button
+            onClick={handleResetTelegram}
+            disabled={resettingTelegram}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            <RefreshCw className={`w-4 h-4 ${resettingTelegram ? 'animate-spin' : ''}`} />
+            Rigenera PIN
+          </button>
+        </div>
+
+        {loadingTelegram ? (
+          <div className="flex items-center justify-center p-4">
+            <Loader2 className="w-6 h-6 text-primary-500 animate-spin" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 p-4 rounded-lg border border-gray-100">
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Stato Connessione</h4>
+              <div className={`flex items-center gap-2 ${telegramDetails.connected ? 'text-green-600' : 'text-amber-600'}`}>
+                {telegramDetails.connected ? (
+                  <>
+                    <CheckCircle className="w-5 h-5" />
+                    <span className="font-medium">Account Collegato</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="w-5 h-5" />
+                    <span className="font-medium">In attesa di collegamento</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-2">Il tuo PIN di Sicurezza:</h4>
+              <div className="flex items-center gap-2">
+                <code className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-lg font-bold tracking-widest text-primary-600">
+                  {telegramDetails.pin}
+                </code>
+                <button
+                  onClick={copyPin}
+                  className="p-2 text-gray-500 hover:text-primary-600 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-gray-200"
+                  title="Copia PIN"
+                >
+                  <Copy className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="md:col-span-2 pt-2 border-t border-gray-200 mt-2">
+              <p className="text-sm text-gray-600">
+                <strong>Come collegare:</strong> Cerca il bot <strong>@CoachAICEO_Bot</strong> su Telegram. Invia questo PIN in chat per sbloccare i tuoi dati.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Identita Coach */}

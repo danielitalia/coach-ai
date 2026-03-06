@@ -100,6 +100,22 @@ async function getTenantByInstanceName(instanceName) {
   return result.rows[0] || null;
 }
 
+async function getTenantByTelegramPin(pin) {
+  const result = await pool.query(
+    'SELECT * FROM tenants WHERE telegram_pin = $1',
+    [pin]
+  );
+  return result.rows[0] || null;
+}
+
+async function getTenantByTelegramChatId(chatId) {
+  const result = await pool.query(
+    'SELECT * FROM tenants WHERE telegram_chat_id = $1',
+    [chatId]
+  );
+  return result.rows[0] || null;
+}
+
 async function updateTenant(tenantId, data) {
   const fields = [];
   const values = [];
@@ -108,7 +124,8 @@ async function updateTenant(tenantId, data) {
   const allowedFields = [
     'name', 'whatsapp_number', 'whatsapp_instance_name', 'whatsapp_connected',
     'logo_url', 'primary_color', 'coach_name', 'coach_personality',
-    'use_emoji', 'custom_system_prompt', 'subscription_plan', 'subscription_status'
+    'use_emoji', 'custom_system_prompt', 'subscription_plan', 'subscription_status',
+    'telegram_chat_id', 'telegram_pin'
   ];
 
   for (const [key, value] of Object.entries(data)) {
@@ -1628,6 +1645,8 @@ module.exports = {
   getTenantBySlug,
   getTenantByWhatsApp,
   getTenantByInstanceName,
+  getTenantByTelegramPin,
+  getTenantByTelegramChatId,
   updateTenant,
   getAllTenants,
 

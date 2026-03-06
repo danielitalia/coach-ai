@@ -377,6 +377,52 @@ router.post('/whatsapp/restart', requireTenant, requireRole('owner', 'admin'), a
   }
 });
 
+// ========== TELEGRAM CEO ==========
+
+// Get Telegram PIN and connection status
+router.get('/telegram', requireTenant, async (req, res) => {
+  try {
+    let pin = req.tenant.telegram_pin;
+
+    // Auto-generate PIN if it doesn't exist
+    if (!pin) {
+      pin = crypto.randomBytes(3).toString('hex').toUpperCase(); // 6 chars, uppercase
+      await db.updateTenant(req.tenantId, { telegramPin: pin });
+    }
+
+    res.json({
+      pin,
+      connected: !!req.tenant.telegram_chat_id,
+    });
+  } catch (error) {
+    console.error('Telegram Get error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reset Telegram Connection
+router.post('/telegram/reset', requireTenant, requireRole('owner', 'admin'), async (req, res) => {
+  try {
+    const newPin = crypto.randomBytes(3).toString('hex').toUpperCase();
+
+    await db.updateTenant(req.tenantId, {
+      telegramPin: newPin,
+      telegramChatId: null
+    });
+
+    await db.addAuditLog(req.tenantId, req.user.id, 'TELEGRAM_CONNECTION_RESET', 'tenant', req.tenantId, null, req.ip);
+
+    res.json({
+      success: true,
+      pin: newPin,
+      connected: false
+    });
+  } catch (error) {
+    console.error('Telegram Reset error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ========== STATS ==========
 
 router.get('/stats', requireTenant, async (req, res) => {
