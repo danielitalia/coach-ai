@@ -240,9 +240,10 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
 - **Notifica Telegram**: alert quando nuova palestra completa onboarding
 - **Salvataggio progressi**: dati salvati ad ogni step
 
-### Analytics Avanzati (NUOVO!)
+### Analytics Avanzati e ROI
 - **Dashboard per tenant**:
   - 4 KPI cards: Messaggi, Check-in, Nuovi Clienti, Automazioni
+  - **ROI Widget (NUOVO!)**: Mostra il fatturato recuperato stimato tramite salvataggi dell'IA
   - Grafico Area: Messaggi inviati/ricevuti nel tempo
   - Grafico Barre: Check-in giornalieri
   - Grafico Linee: Clienti attivi e nuovi
@@ -255,6 +256,11 @@ Coach AI è un **personal trainer virtuale WhatsApp** per palestre. I clienti po
   - Dati ultimi 7 giorni con evidenziazione
   - Totali aggregati in footer
   - Pulsante "Ricalcola Tutte" per backfill globale
+
+### Modello Operativo "High Touch" (NUOVO!)
+- Il sistema supporta l'onboarding di palestre senza abbonamenti Stripe
+- Il SuperAdmin può sospendere manualmente interi tenant in caso di mancato pagamento ("Palestra Sospesa")
+- La sospensione cessa l'attività web dei coach, scarta i webhook di WhatsApp, e blocca le esecuzioni periodiche del Brain AI e delle automazioni
 
 ## API Endpoints Principali
 
@@ -300,6 +306,7 @@ POST   /api/superadmin/tenants - Crea nuova palestra
 PUT    /api/superadmin/tenants/:id - Modifica palestra (incluso abbonamento)
 DELETE /api/superadmin/tenants/:id - Elimina palestra
 GET    /api/superadmin/tenants/:id - Dettagli singola palestra
+POST   /api/superadmin/tenants/:id/suspend - Sospendi/Riattiva palestra manualmente
 POST   /api/superadmin/tenants/:id/onboarding - Genera link onboarding
 GET    /api/superadmin/tenants/:id/onboarding - Stato onboarding
 GET    /api/superadmin/analytics - Analytics globali tutte le palestre
@@ -578,6 +585,16 @@ onboarding_tokens:
   - expires_at TIMESTAMP
   - started_at TIMESTAMP
   - completed_at TIMESTAMP
+  - created_at TIMESTAMP
+  
+brain_recoveries: (Tracciamento Churn ROI)
+  - id SERIAL
+  - tenant_id UUID
+  - phone VARCHAR(20)
+  - action_id UUID              -- Riferimento a brain_actions (il messaggio inviato)
+  - recovered_at TIMESTAMP      -- Data del check-in che conferma il recupero
+  - days_since_action INTEGER   -- Quanti giorni dopo il msg è tornato?
+  - value_saved DECIMAL(10,2)   -- Fatturato stimato salvato (es. 50.00 EUR)
   - created_at TIMESTAMP
 ```
 
